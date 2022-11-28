@@ -815,3 +815,137 @@ test('测试jest.fn()返回Promise', async () => {
 })
 ~~~
 
+### 实现effect的stop和onStop功能
+
+**`stop(runner)`可以删除当前dep中的runner（也就是effect返回的function）**
+
+~~~js
+it( 'stop', () => {
+    let dummy: unknown
+    const obj = reactive( { prop: 1 } )
+    const runner = effect( () => {
+        dummy = obj.prop
+    })
+    obj.prop = 2
+    expect(dummy).toBe(2)
+    // 执行stop 阻止runner的执行
+    stop(runner)
+    obj.prop = 3
+    expect(dummy).toBe(2)
+
+    // stoped effect should still be manually 			callable
+    runner()
+    expect(dummy).toBe(3)
+})
+~~~
+
+实现上述测试功能
+
+1. 在effect中导出`stop(runner)`，给runner设置为any，并添加effect属性，存储当前_effect对象，本身runner是\_effect中fn的执行结果
+
+   ~~~ts
+   // effect.ts
+   
+   export function effect(fn, options: any = {}) {
+     // 新增  
+     // 以当前的effect实例作为this
+     const runner: any =  _effect.run.bind(_effect);
+     runner.effect = _effect;
+     return runner;
+   }
+   
+   export function stop(runner) {
+     runner.effect.stop()
+   }
+   ~~~
+
+2. 要找到有哪些target[key]的 dep库存储了当前_effect，在track中反向收集
+
+   ~~~ts
+   // track
+   
+   dep.add(activeEffect)
+   activeEffect.deps.push(dep) // 反向收集
+   
+   // class ReactiveEffect
+   // 新增deps
+   deps = []
+   ~~~
+
+3. run方法遍历deps，将每一个Set中的当前effect对象删除
+
+   ~~~ts
+   // class ReactiveEfect
+     stop() {
+       this.deps.forEach((dep: any) => {
+         // dep是target[key]的Set()
+         // 要删除所有dep库中的当前_effect对象
+         dep.delete(this);
+       })
+     }
+   ~~~
+
+**重构一下上面代码:**
+
++ 封装一下 stop() 中的清除函数功能
++ 给一个状态active，如果清除过当前effect就不用再清除
+
+~~~ts
+// class ReactiveEffect
+active = true;
+stop() {
+  if (this.active) {
+    cleanupEffect(this);
+    this.active = false
+  }
+    
+// effect.ts
+function cleanupEffect(effect) {
+  effect.deps.forEach((dep: any) => {
+    // dep是target[key]的Set()
+    // 要删除所有dep库中的当前_effect对象
+    dep.delete(effect);
+  })
+}
+~~~
+
+
+
+**`onStop`是调用stop后的回调函数，允许调用stop后可进行其它操作**
+
+~~~ts
+it( 'onStop', () => {
+    const obj = reactive({
+        foo: 1
+    })
+    const onStop = jest.fn()
+    let dummy: number
+    const runner = effect( () => {
+        dummy = obj.foo
+    }, { onStop })
+    stop(runner)
+    expect(onStop).toBeCalledTimes(1)
+})
+~~~
+new ReactiveEffect传入onStop参数
+
+ReactiveEffect新增onStop属性，在stop函数中判断有没有onStop回调函数，有的话就调用
+
+~~~ts
+// class ReactiveEffect
+onStop?: () => void
+
+stop() {
+  if (this.active) {
+    cleanupEffect(this);
+    if (this.onStop) {
+      this.onStop();
+    }
+    this.active = false
+  }
+}
+~~~
+
+
+
+`Object.assign` 方法只会拷贝源对象 *可枚举的* 和 *自身的* 属性到目标对象
