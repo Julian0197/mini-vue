@@ -6,7 +6,7 @@ class ReactiveEffect {
   run() {
     // this指向当前的实例对象_effect
     activeEffect = this;
-    this._fn();
+    return this._fn();
   }
 }
 
@@ -37,8 +37,11 @@ export function trigger(target, key) {
   });
 }
 
-let activeEffect 
+let activeEffect;
 export function effect(fn) {
   const _effect = new ReactiveEffect(fn);
   _effect.run();
+
+  // 以当前的effect实例作为this
+  return _effect.run.bind(_effect)
 }

@@ -397,7 +397,7 @@ setTimeout(() => {
 
      比如使用Proxy代理对象obj，当通过代理对象修改obj上的不可修改属性时，会抛出`TypeError`阻塞后面的代码，需要使用`try...catch`捕获。而使用`Reflect.set`返回false，代码正常执行。
 
-##### 基础版响应式
+#### 基础版响应式
 
 ~~~js
 // 定义仓库
@@ -467,5 +467,213 @@ function trigger(target, key) {
 }
 ~~~
 
+#### 嵌套effect
 
+实际工作中，比如vue的渲染函数中，各个组件嵌套关系，组件中使用的`effect`是必然会发生嵌套的
+
+~~~js
+effect(() => {
+    Father.render()
+    
+    // 嵌套子组件
+    effect(() => {
+        Son.render()
+    })
+})
+~~~
+
+比如，下方代码：foo的依赖函数中嵌套了bar的依赖函数
+
++ 先执行effect1函数，activeEffect被赋值为effect1
++ 再执行effect2函数，activeEffect被赋值为effect2
++ effect2函数内调用了obj.bar，触发了obj的getter函数，将当前activeEffect添加到bar的依赖函数库中
++ 执行完effect2，继续执行effect1，调用了obj.foo，触发了obj的getter函数，将当前activeEffect（其实是effect2）添加到foo的依赖函数库中
++ 依赖收集后，执行`obj.foo = '前来买瓜'`，触发了obj的setter函数，调用foo的依赖函数库，相当于又执行了effect2
+
+~~~js
+const data = { foo: 'pino', bar: '在干啥' }
+// 创建代理对象
+const obj = reactive(data)
+
+let p1, p2;
+// 设置obj.foo的依赖函数
+effect(function effect1(){
+  console.log('effect1执行');
+  // 嵌套，obj.bar的依赖函数
+  effect(function effect2(){
+    p2 = obj.bar
+
+    console.log('effect2执行')
+  })
+  p1 = obj.foo
+})
+
+// 修改obj.foo的值
+obj.foo = '前来买瓜'
+~~~
+
+<img src="https://p3-juejin.byteimg.com/tos-cn-i-k3u1fbpfcp/11ff0565e88140af8381ea563200ca2e~tplv-k3u1fbpfcp-zoom-in-crop-mark:4536:0:0:0.awebp?" alt="image_1659170045716_0.png" style="zoom:80%;" />
+
+**解决：使用函数栈（先进后出），将`activeEffect`指向栈顶的依赖函数**
+
+~~~js
+// 增加effect调用栈
+const effectStack = [];
+
+function effect(fn) {
+    let effectFn = function() {
+        activeEffect = effectFn
+        // 入栈
+        effectStack.push(effectFn)
+        // 执行fn时收集依赖activeEffect
+		fn()
+        // 收集完后再出栈
+        effectStack.pop()
+        // activeEffect重新指向栈顶
+        activeEffect = effectStack[effectStack.length - 1] 
+    }
+    effectFn()
+}
+~~~
+
+ #### 避免无限循环
+
+如果`effect`函数改为下面代码：会出现栈溢出
+
+~~~js
+// 定义一个对象
+let data = {
+  name: 'pino',
+  age: 18
+}
+// 将data更改为响应式对象
+let obj = reactive(data)
+
+effect(() => {
+  obj.age++
+})
+
+// uncaught RangeError: Maximum call stack size exceeded
+~~~
+
+`obj.age++`相当于执行了`obj.age = obj.age + 1`
+
++ 读取obj.age，触发track收集了当前effect函数
++ 紧接着给obj.age赋值，触发trigger将继续执行effect函数
++ 但是此时该依赖函数正在执行中，还没有执行完就要再次开始下一次的执行。就会导致无限的递归调用自己。
+
+**解决：在触发trigger前，判断当前取出的依赖函数是否等于`activeEffect`就可以避免重复执行一个函数**
+
+~~~js
+function trigger(target, key) {
+    let depsMap = store.get(target)
+    if (!depsMap) return
+    const effects = depsMap.get(key)
+    let effectsToRun = new Set()
+    effects && effects.forEach(effectFn => {
+        if (effectFn !== activeEffect) {
+            effectsToRun.add(effectFn)
+        }
+    })
+    
+    effectsToRun.forEach(effect => effect())
+}
+~~~
+
+---
+
+**本项目mini-vue中reactive和effect实现：**
+
+~~~js
+ class ReactiveEffect{
+  private _fn:any;
+  constructor(fn){
+    this._fn = fn;
+  }
+  run(){
+    activeEffect = this;
+    this._fn();
+  }
+}
+
+const targetMap = new Map();
+export function track(target,key){
+  // target -> key -> dep
+  let depsMap = targetMap.get(target);
+  if(!depsMap){
+    depsMap = new Map();
+    targetMap.set(target,depsMap);
+  }
+  let dep = depsMap.get(key);
+  if(!dep){
+    dep = new Set();
+    depsMap.set(key,dep)
+  }
+  dep.add(activeEffect);
+}
+export function trigger(target,key){
+  let depsMap = targetMap.get(target);
+  let dep = depsMap.get(key);
+  for(const effect of dep){
+    effect.run();
+  }
+}
+
+let activeEffect;
+export function effect(fn){
+  const _effect = new ReactiveEffect(fn);
+  _effect.run();
+}
+~~~
+
+### 实现effect返回runner
+
+effect函数会返回一个function，我们称为runner，当调用这个runner时会执行传入的fn，并返回fn的值
+
+**测试案例：**
+
+~~~js
+// effect.spec.ts
+
+it( 'should return render when call effect', () => {
+        //  effect(fn) -> function(render) -> fn -> return
+        // 调用effect返回一个function，runner。 调用runner的时候会再次执行fn，当调用fn的时候 返回fn的返回值
+        let foo = 10
+        const runner:any = effect( () => {
+            foo++
+            return "foo"
+        })
+        expect(foo).toBe(11) // 测试执行foo++
+
+        const r = runner() 
+        expect(foo).toBe(12) // 当获取返回值的时候，是否再次执行
+        expect(r).toBe("foo") // 判断返回值是否是fn函数内的 return
+    })
+~~~
+
+因为需要一个返回值，所以直接在effect方法里返回 _effect.run 方法
+
+```js
+ export function effect(fn) {
+    // fn
+    const _effect = new ReactiveEffect(fn)
+    _effect.run()
+    return _effect.run.bind(_effect) // 这里的bind处理的是返回当前函数，所以做了个bind处理
+}
+```
+
+而ReactiveEffect 类里需要改一下run，直接返回绑定的当前fn
+
+```js
+class ReactiveEffect {
+    private _fn: any
+    constructor(fn){
+        this._fn = fn
+    }
+    run(){
+        activeEffect = this
+        return this._fn()
+    }
+}
+```
 
