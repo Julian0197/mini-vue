@@ -1,6 +1,7 @@
 class ReactiveEffect {
   private _fn: any;
-  constructor(fn) {
+  // ?表示可有可无的参数 public外部可以获取到
+  constructor(fn, public scheduler?) {
     this._fn = fn;
   }
   run() {
@@ -32,14 +33,19 @@ export function track(target, key) {
 export function trigger(target, key) {
   let depsMap = targetMap.get(target)
   let dep = depsMap.get(key)
-  dep.forEach(effect => {
-    effect.run();
-  });
+
+  for (const effect of dep) {
+    if (effect.scheduler) {
+      effect.scheduler()
+    } else {
+      effect.run()
+    }
+  }
 }
 
 let activeEffect;
-export function effect(fn) {
-  const _effect = new ReactiveEffect(fn);
+export function effect(fn, options: any = {}) {
+  const _effect = new ReactiveEffect(fn, options.scheduler);
   _effect.run();
 
   // 以当前的effect实例作为this

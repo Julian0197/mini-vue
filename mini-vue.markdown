@@ -677,3 +677,141 @@ class ReactiveEffect {
 }
 ```
 
+### 完善effect的scheduler方法
+
+scheduler调度器，用来执行一些**异步、周期性任务**
+
+1. 通过effect的第二个参数给定一个 scheduler 的fn
+2. effect 会执行fn
+3. 当响应式对象 set update的时候不会执行fn 而是执行第二个参数 scheduler函数
+4. 然后执行runner的时候，会再次执行 fn
+
+~~~js
+it( 'scheduler', () => {
+        let dummy
+        let run: any
+        const scheduler = jest.fn( () => {
+            run = runner
+        })
+        const obj = reactive( { foo: 1 } )
+        const runner = effect( () => {
+            dummy = obj.foo
+        }, { scheduler })
+        expect(scheduler).not.toHaveBeenCalled()
+        expect(dummy).toBe(1)
+        // should be called on first trigger
+        obj.foo++
+        expect(scheduler).toHaveBeenCalledTimes(1)
+        // should not run yet
+        expect(dummy).toBe(1)
+
+        // manually run 手动执行run
+        run()
+        // should have run
+        expect(dummy).toBe(2)
+    })
+~~~
+
+希望传入scheduler后，触发trigger时，绕过fn，直接执行scheduler。在trigger最后那个判断effect是否有scheduler属性
+
+~~~ts
+export function trigger(target: any, key: string | symbol) {
+    let depsMap = targetMap.get(target)
+    let dep = depsMap.get(key)
+     for (const effect of dep) {
+         // 判断effect是否哟scheduler方法
+         if( effect.scheduler ) {
+            effect.scheduler()
+         } else {
+            effect.run()
+         }
+     }
+}
+~~~
+
+effect传入options，在ReactiveEffect构造函数中要设置第二个参数为options对象的scheduler方法
+
+```ts
+export function effect(fn, options: any = {}) {
+    // fn
+    const _effect = new ReactiveEffect(fn, options?.scheduler)
+    _effect.run()
+    return _effect.run.bind(_effect)
+}
+```
+
+~~~ts
+class ReactiveEffect {
+    private _fn: any
+    // ?表示可有可无的参数 public外部可以获取到
+    constructor(fn: any, public scheduler?: any){
+        this._fn = fn
+    }
+    run(){
+        activeEffect = this
+        return this._fn()
+    }
+}
+~~~
+
+#### jest中的Mock函数
+
+创建Mock函数帮助我们测试项目中一些逻辑复杂的代码，例如：函数的嵌套调用等。在单元测试中，我们有时函数调用的结果和执行过程，只想知道它是否被正确调用。
+
+Mock函数提供以下三种特性：
+
++ 捕获函数的调用情况
++ 设置函数的返回值
++ 改变函数的内部实现
+
+`jest.fn()`、`jest.spyOn()`、`jest.mock()`三种API用于创建Mock函数
+
+
+
+**jest.fn()创建mock函数**
+
+最简单创建Mock函数的方法，如果没有定义函数内部实现方式，返回`undefined`
+
+~~~js
+test('测试jest.fn()调用', () => {
+  let mockFn = jest.fn();
+  let result = mockFn(1, 2, 3);
+
+  // 断言mockFn的执行后返回undefined
+  expect(result).toBeUndefined();
+  // 断言mockFn被调用
+  expect(mockFn).toBeCalled();
+  // 断言mockFn被调用了一次
+  expect(mockFn).toBeCalledTimes(1);
+  // 断言mockFn传入的参数为1, 2, 3
+  expect(mockFn).toHaveBeenCalledWith(1, 2, 3);
+})
+~~~
+
+`jest.fn()`所创建的Mock函数还可以**设置返回值**，**定义内部实现**或**返回`Promise`对象**。
+
+~~~js
+test('测试jest.fn()返回固定值', () => {
+  let mockFn = jest.fn().mockReturnValue('default');
+  // 断言mockFn执行后返回值为default
+  expect(mockFn()).toBe('default');
+})
+
+test('测试jest.fn()内部实现', () => {
+  let mockFn = jest.fn((num1, num2) => {
+    return num1 * num2;
+  })
+  // 断言mockFn执行后返回100
+  expect(mockFn(10, 10)).toBe(100);
+})
+
+test('测试jest.fn()返回Promise', async () => {
+  let mockFn = jest.fn().mockResolvedValue('default');
+  let result = await mockFn();
+  // 断言mockFn通过await关键字执行后返回值为default
+  expect(result).toBe('default');
+  // 断言mockFn调用后返回的是Promise对象
+  expect(Object.prototype.toString.call(mockFn())).toBe("[object Promise]");
+})
+~~~
+

@@ -34,5 +34,28 @@ describe("effect", () => {
     expect(r).toBe("foo");
   });
 
+  it("scheduler", () => {
+    let dummy;
+    let run: any;
+    const scheduler = jest.fn(() => {
+      run = runner;
+    })
 
+    const obj = reactive({foo: 1})
+    const runner = effect(
+      () => {
+        dummy = obj.foo
+      },
+      { scheduler }
+    );
+    expect(scheduler).not.toHaveBeenCalled();
+    expect(dummy).toBe(1);
+    obj.foo++;
+    // 希望trigger不调用effect，而是执行scheduler
+    expect(scheduler).toHaveBeenCalledTimes(1);
+    expect(dummy).toBe(1);
+    // run函数执行effect函数的返回值
+    run();
+    expect(dummy).toBe(2)
+  })
 });
