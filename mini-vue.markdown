@@ -626,7 +626,7 @@ export function effect(fn){
 }
 ~~~
 
-### 实现effect返回runner
+## 实现effect返回runner
 
 effect函数会返回一个function，我们称为runner，当调用这个runner时会执行传入的fn，并返回fn的值
 
@@ -677,7 +677,7 @@ class ReactiveEffect {
 }
 ```
 
-### 完善effect的scheduler方法
+## 完善effect的scheduler方法
 
 scheduler调度器，用来执行一些**异步、周期性任务**
 
@@ -754,7 +754,7 @@ class ReactiveEffect {
 }
 ~~~
 
-#### jest中的Mock函数
+### jest中的Mock函数
 
 创建Mock函数帮助我们测试项目中一些逻辑复杂的代码，例如：函数的嵌套调用等。在单元测试中，我们有时函数调用的结果和执行过程，只想知道它是否被正确调用。
 
@@ -815,7 +815,7 @@ test('测试jest.fn()返回Promise', async () => {
 })
 ~~~
 
-### 实现effect的stop和onStop功能
+## 实现effect的stop和onStop功能
 
 **`stop(runner)`可以删除当前dep中的runner（也就是effect返回的function）**
 
@@ -946,6 +946,112 @@ stop() {
 }
 ~~~
 
-
-
 `Object.assign` 方法只会拷贝源对象 *可枚举的* 和 *自身的* 属性到目标对象
+
+将Object.assign封装成工具函数使用
+
+~~~ts
+export function effect(fn, options: any = {}) { // options写成对象因为还有很多其他配置
+  // _effect.onStop = options.onStop;
+  // Object.assign(_effect, options);
+  extend(_effect, options);
+}
+~~~
+
+## 实现readonly
+
+readonly包裹的数据只能get操作，不能set操作，也就不需要依赖收集和触发依赖
+
+再写一个单元测试
+
+~~~ts
+describe("readonly", () => {
+  it("happy path", () => {
+    // 不能set，只能get
+    const original = {foo: 1, bar: {baz: 2}};
+    const wrapped = readonly(original);
+    expect(wrapped).not.toBe(original)
+    expect(wrapped.foo).toBe(1)
+  });
+
+  it("warn then call set", () => {
+    // 验证console.warn是否被调用
+    console.warn = jest.fn();
+    const user = readonly({
+      age: 10,
+    })
+    user.age = 11;
+    expect(console.warn).toBeCalled()
+  })
+})
+~~~
+
+readonly代码实现简单，由于和reactive有高相似性，将proxy后的配置对象，包括getter和setter方法抽离出来。
+
+~~~ts
+// baseHandlers.ts
+
+import { track, trigger } from "./effect";
+
+// 缓存get和set方法，只需要初始化时调用一次
+const get = createGetter();
+const set = createSetter();
+const readonlyGet = createGetter(true);
+
+// 抽离get
+function createGetter(isReadonly = false) {
+  return function get(target, key) {
+    const res = Reflect.get(target, key)
+    if (!isReadonly) {
+      // 依赖收集
+      track(target, key)
+    }
+    return res;
+  }
+}
+
+// 抽离set
+function createSetter() {
+  return function set(target, key, value) {
+    const res = Reflect.set(target, key, value);
+    // 触发依赖
+    trigger(target, key);
+    return res;
+  }
+}
+
+export const mutableHandlers = {
+  get,
+  set
+}
+
+export const readonlyHandlers = {
+  get: readonlyGet,
+  set(target, key, value) {
+    console.warn(`key:${key} set 失败，因为${target}是readonly`)
+    return true;
+  }
+}
+~~~
+
+这样reactive的逻辑就比较清楚了
+
+~~~ts
+// reactive.ts
+
+import { mutableHandlers, readonlyHandlers } from "./baseHandlers";
+
+export function reactive(raw) {
+  return createActiveObject(raw, mutableHandlers);
+}
+
+export function readonly(raw) {
+  return createActiveObject(raw, readonlyHandlers);
+}
+
+// 再封装一下
+function createActiveObject(raw: any, baseHandlers) {
+  return new Proxy(raw, baseHandlers);
+}
+~~~
+
