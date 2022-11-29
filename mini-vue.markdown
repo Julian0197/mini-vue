@@ -1079,4 +1079,69 @@ if (key === ReactiveFlags.IS_REACTIVE) {
 
 isReadonly同理
 
-## 
+## 优化effect的stop功能
+
+在单元测试中，`stop(runner)`后，`obj.prop = 3`不再触发，但是`obj.prop++`仍然触发。
+
+因为`obj.prop++`相当于`obj = obj.prop + 1`，会先执行set再执行get，执行set时候又会收集依赖runner，所以set又会触发依赖。
+
+~~~ts
+  it("stop", () => {
+    let dummy;
+    const obj = reactive({prop: 1})
+    const runner = effect(() => {
+      dummy = obj.prop
+    });
+    obj.prop = 2;
+    expect(dummy).toBe(2)
+    stop(runner);
+    // obj.prop = 3
+    obj.prop++;
+    expect(dummy).toBe(2)
+
+    // stoped effect should still be manually callable
+    runner()
+    expect(dummy).toBe(3)
+  })
+~~~
+
+抽离track逻辑
+
+~~~ts
+// track
+// 写在最前面
+if (!isTracking()) return;
+
+
+// 抽离effect.stop后的几个逻辑
+function isTracking() {
+  return shouldTrack && activeEffect !== undefined
+  // if (!activeEffect) return; // 当前没有依赖收集
+  // if (!shouldTrack) return; // 当前收集依赖通过stop方法暂停了
+}
+~~~
+
+在run方法中利用active判断是否需要收集依赖
+
+如果stop effect后碰上`proxy.attr++`，利用shouldTrack变量不收集effect
+
+~~~ts
+// class ReactiveEffect  
+run() {
+    // run方法会收集依赖
+    // 用shouldTrack全局变量来做区分，是否能够触发依赖
+    if (!this.active) {
+      // 表明当前是effect对象是stop状态，不用收集依赖
+      return this._fn();
+    }
+
+    shouldTrack = true;
+    // this指向当前的实例对象_effect
+    activeEffect = this;
+    const result = this._fn();
+    shouldTrack = false; // reset
+
+    return result;
+  }
+~~~
+
