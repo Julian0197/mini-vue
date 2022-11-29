@@ -1055,3 +1055,28 @@ function createActiveObject(raw: any, baseHandlers) {
 }
 ~~~
 
+## 实现isReactive和isReadonly
+
+实现isReactive只需要访问getter，在getter中根据isReadonly变量判断。
+
+~~~ts
+// 抽离is_reactive变量
+export const enum ReactiveFlags {
+  IS_REACTIVE = "__v_isReactive",
+}
+
+export function isReactive(value) {
+        // !!转化为布尔值，如果没有触发getter，返回undefined
+  return !!value[ReactiveFlags.IS_REACTIVE];
+}
+
+
+// baseHandlers createGetter
+if (key === ReactiveFlags.IS_REACTIVE) {
+  return !isReadonly;
+}
+~~~
+
+isReadonly同理
+
+## 
