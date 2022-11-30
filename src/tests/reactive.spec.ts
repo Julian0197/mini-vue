@@ -7,7 +7,20 @@ describe("reactive", () => {
     expect(observed).not.toBe(original);
     expect(observed.foo).toBe(1);
 
+    expect(isReactive(observed)).toBe(true);
+    expect(isReactive(original)).toBe(false);
+  });
+
+  // 多层对象，reactive测试
+  it("nested reactive", () => {
+    const original = {
+      nested: { foo: 1 },
+      array: [{ bar: 2 }],
+    };
+    const observed = reactive(original)
     expect(isReactive(observed)).toBe(true)
-    expect(isReactive(original)).toBe(false)
+    expect(isReactive(observed.nested)).toBe(true)
+    expect(isReactive(observed.array)).toBe(true)
+    expect(isReactive(observed.array[0])).toBe(true)
   });
 });

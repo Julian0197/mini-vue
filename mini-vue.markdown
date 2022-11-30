@@ -1145,3 +1145,53 @@ run() {
   }
 ~~~
 
+### reactive & readonly 多层对象处理
+
+测试用例
+
+~~~ts
+// 多层对象 进行reactive
+    test("nested reactive", () => {
+        const original = {
+            nested: { foo: 1},
+            aray: [ { bar: 2 } ]
+        }
+        const observed = reactive(original)
+        expect(isReactive(observed)).toBe(true)
+        expect(isReactive(observed.nested)).toBe(true)
+        expect(isReactive(observed.aray)).toBe(true)
+        expect(isReactive(observed.aray[0])).toBe(true)
+    })
+
+// 多层对象 进行readonly
+    test("nested reactive", () => {
+        const original = {
+            nested: { foo: 1},
+            foo: 3,
+            aray: [ { bar: 2 } ]
+        }
+        const wrapped = readonly(original) 
+        expect(wrapped).not.toBe(original)
+        expect(isReadonly(wrapped)).toBe(true)
+        expect(isReadonly(original)).toBe(false)
+        expect(wrapped.foo).toBe(3)
+    })
+~~~
+
+在getter中，返回res前，判断res是否是readonly或者reactive对象，如果是的话就嵌套处理。
+
+~~~js
+// 判断res是不是obj，如果是继续reactive
+        if(isObject(res)) {
+            return isReadonly ? readonly(res) : reactive(res)
+        }
+~~~
+
+将isOject函数封装到公共库
+
+~~~js
+export const isObject = (val) => {
+    return res !== null && typeof res === 'o'
+}
+~~~
+
