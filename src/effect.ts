@@ -69,21 +69,25 @@ export function track(target, key) {
     depsMap.set(key, dep);
   }
 
-  // 如果当前依赖已经收集，不需要再收集了
-  if (dep.has(activeEffect)) return;
-  dep.add(activeEffect);
-  // 反向收集，用effect收集dep
-  activeEffect.deps.push(dep);
+  trackEffects(dep)
 }
+
+// 重构针对ref和reactive对象都可以使用
+export function trackEffects(dep) {
+  // // 如果当前依赖已经收集，不需要再收集了
+  if (dep.has(activeEffect)) return;
+  dep.add(activeEffect)
+  // 反向收集，用effect收集dep
+  activeEffect.deps.push(dep)
+}
+
 
 // 抽离effect.stop后的几个逻辑
-function isTracking() {
+export function isTracking() {
   return shouldTrack && activeEffect !== undefined
-  // if (!activeEffect) return; // 当前没有依赖收集
+  // if (!activeEffect) return; // 当前没有执行过effect，没有收集依赖
   // if (!shouldTrack) return; // 当前收集依赖通过stop方法暂停了
 }
-
-
 
 
 
@@ -92,6 +96,10 @@ export function trigger(target, key) {
   let depsMap = targetMap.get(target);
   let dep = depsMap.get(key);
 
+  triggerEffects(dep)
+}
+
+export function triggerEffects(dep) {
   for (const effect of dep) {
     if (effect.scheduler) {
       effect.scheduler();
@@ -99,7 +107,8 @@ export function trigger(target, key) {
       effect.run();
     }
   }
-}
+} 
+
 
 export function effect(fn, options: any = {}) {
   // options写成对象因为还有很多其他配置

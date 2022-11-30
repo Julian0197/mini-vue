@@ -1,4 +1,4 @@
-import { isReactive, reactive } from "../reactive";
+import { isReactive, reactive, isProxy } from "../reactive";
 
 describe("reactive", () => {
   it("happy path", () => {
@@ -9,6 +9,8 @@ describe("reactive", () => {
 
     expect(isReactive(observed)).toBe(true);
     expect(isReactive(original)).toBe(false);
+
+    expect(isProxy(observed)).toBe(true)
   });
 
   // 多层对象，reactive测试

@@ -1,0 +1,49 @@
+import { isTracking, trackEffects, trigger, triggerEffects } from "./effect";
+import { reactive } from "./reactive";
+import { hasChanged, isObject } from "./shared";
+
+class RefImpl {
+  private _value: any;
+  // 和reactive不同的是，只有一个数据，只需要一个仓库存放依赖
+  public dep;
+  private _rawValue: any;
+  constructor(value) {   
+    this._rawValue = value
+    // 看看value是不是对象，是的话需要reactive包裹
+    this._value = convert(value)
+
+    this.dep = new Set();
+  }
+  get value() {
+    // 如果没有触发effect()，activeEffect为undefined
+    trackRefValue(this)
+
+    return this._value;
+  }
+
+  set value(newValue) {
+    // 判断newValue是否和旧的value不一样
+    // 这里对比新旧值，是两个object对比，有可能一个是proxy
+    if (!hasChanged(this._rawValue, newValue)) {
+      this._rawValue = newValue
+      this._value = convert(newValue)
+      triggerEffects(this.dep);
+    }
+  }
+}
+
+function convert(value) {
+  return isObject(value) ? reactive(value) : value
+}
+
+
+function trackRefValue(ref) {
+  // 如果没有触发effect()，activeEffect为undefined
+  if (isTracking()) {
+    trackEffects(ref.dep);
+  }
+}
+
+export function ref(value) {
+  return new RefImpl(value);
+}

@@ -1233,5 +1233,77 @@ export const shallowReadonlyHandlers = extend({}, readonlyHandlers, {
 })
 ~~~
 
+### 实现isProxy和ref功能
+
+isProxy：检查一个object是否是由readonly或者reactive创建出来的
+
+~~~ts
+export function isProxy(value) {
+  return isReactive(value) || isReadonly(value)
+}
+~~~
 
 
+
+ref：接受一个参数值（基础数据类型，也包括对象）返回一个响应式数据，ref对象拥有一个指向内部值的单一属性ref
+
+先写测试：
+
+测试案例较多时，如果想只跑一个：`it.only()`，跳过这个`it.skip()`
+
+~~~ts
+describe("ref", () => {
+  it("happy path", () => {
+    const a = ref(1);
+    expect(a.value).toBe(1)
+  })
+
+  it("should be a reactibe", () => {
+    const a = ref(1);
+    let dummy;
+    let calls = 0
+    effect(() => {
+      calls++;
+      dummy = a.value
+    });
+    expect(calls).toBe(1)
+    expect(dummy).toBe(1)
+    a.value = 2
+    expect(calls).toBe(2)
+    expect(dummy).toBe(2);
+
+    // same value should not trigger
+    a.value = 2
+    expect(calls).toBe(2)
+    expect(dummy).toBe(2);
+  });
+
+  it("should make nested properties reactive", () => {
+    const a = ref({
+      count: 1,
+    });
+    let dummy;
+    effect(() => {
+      dummy = a.value.count
+    });
+    expect(dummy).toBe(1)
+    a.value.count = 2
+    expect(dummy).toBe(2)
+  })
+})
+~~~
+
+
+
++ 实现一个RefImpl接口，因为只有一个数据所以只需要一个dep存放依赖
+
+  
+
+
+
+
+
+`Object.is()`：判断两个值是否相同
+
++ 与`==`不同，==在判断相等前对两边变量（如果不同类）进行强制转换，Object.is不会强制转换
++ 与`===`不同，差别是对待有符号的零和NaN不同，例如，===认为`+0`和`-0`相等，而将`Number.NaN`与`NaN`视为不等

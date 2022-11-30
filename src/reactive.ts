@@ -28,6 +28,10 @@ export function shallowReadonly(raw) {
   return createActiveObject(raw, shallowReadonlyHandlers)
 }
 
+export function isProxy(value) {
+  return isReactive(value) || isReadonly(value)
+}
+
 // 再封装一下
 function createActiveObject(raw: any, baseHandlers) {
   return new Proxy(raw, baseHandlers);
