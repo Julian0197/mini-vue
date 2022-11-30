@@ -1,4 +1,4 @@
-import { mutableHandlers, readonlyHandlers } from "./baseHandlers";
+import { mutableHandlers, readonlyHandlers, shallowReadonlyHandlers } from "./baseHandlers";
 
 // 抽离is_reactive变量
 export const enum ReactiveFlags {
@@ -24,7 +24,12 @@ export function readonly(raw) {
   return createActiveObject(raw, readonlyHandlers);
 }
 
+export function shallowReadonly(raw) {
+  return createActiveObject(raw, shallowReadonlyHandlers)
+}
+
 // 再封装一下
 function createActiveObject(raw: any, baseHandlers) {
   return new Proxy(raw, baseHandlers);
 }
+

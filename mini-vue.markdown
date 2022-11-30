@@ -1191,7 +1191,47 @@ run() {
 
 ~~~js
 export const isObject = (val) => {
-    return res !== null && typeof res === 'o'
+    return res !== null && typeof res === 'object'
 }
 ~~~
+
+### 实现shallowReadonly
+
+shallowReadonly只把外层的obj变成readonly，obj里面的对象不是readonly
+
+创建shallowReadonly的测试用例
+
+~~~ts
+describe("shallowReadonly", () => {
+  // shallowReadonlt 生成的对象最外层是readonly状态，里面的对象不是
+  it("should not make non-reactive properties reactive", () => {
+    const props = shallowReadonly({n: {foo: 1}})
+    expect(isReadonly(props)).toBe(true)
+    expect(isReadonly(props.n)).toBe(false)
+  })
+
+  it("warn then call set", () => {
+    // 验证console.warn是否被调用
+    console.warn = jest.fn();
+    const user = shallowReadonly({
+      age: 10,
+    })
+    user.age = 11;
+    expect(console.warn).toBeCalled()
+  })
+})
+~~~
+
+shallowReadonly，需要在初试的getter中添加一个变量shallow判断，shallowReadonly只需要在readonly配置上修改自己的getter
+
+~~~ts
+const shallowReadonlyGet = createGetter(true, true)
+
+// extend 相当于Object.assign(),后面可以覆盖
+export const shallowReadonlyHandlers = extend({}, readonlyHandlers, {
+  get: shallowReadonlyGet,
+})
+~~~
+
+
 
