@@ -1401,3 +1401,46 @@ export function unRef(ref) {
 }
 ~~~
 
+### 实现proxyRefs功能
+
+适用于Vue3 setup中，return的一个对象内部有ref类型数据。但是在template中访问该ref，不需要通过.value在访问值，这一功能就是通过proxyRefs实现的
+
+测试案例
+
+~~~ts
+it("proxyRefs", () => {
+  const user = {
+    age: ref(31),
+    name: "Macro"
+  };
+
+  const proxyUser = proxyRefs(user)
+  expect(user.age.value).toBe(31)
+  expect(proxyUser.age).toBe(31)
+  expect(proxyUser.name).toBe("Macro")
+})
+
+~~~
+
+区分target[key]和newValue分别是ref还是普通值的情况
+
+~~~ts
+export function proxyRefs(objectWithRefs) {
+  return new Proxy(objectWithRefs, {
+    get(target, key) {
+      // get => 如果ref就返回它的.value
+      // not ref => 直接返回它
+      return unRef(Reflect.get(target, key));
+    },
+
+    set(target, key, value) {
+      if (isRef(target[key]) && !isRef(value)) {
+        return target[key].value = value
+      } else {
+        return Reflect.set(target, key, value)
+      }
+    }
+  });
+}
+~~~
+
