@@ -1145,7 +1145,7 @@ run() {
   }
 ~~~
 
-### reactive & readonly 多层对象处理
+## reactive & readonly 多层对象处理
 
 测试用例
 
@@ -1195,7 +1195,7 @@ export const isObject = (val) => {
 }
 ~~~
 
-### 实现shallowReadonly
+## 实现shallowReadonly
 
 shallowReadonly只把外层的obj变成readonly，obj里面的对象不是readonly
 
@@ -1233,7 +1233,7 @@ export const shallowReadonlyHandlers = extend({}, readonlyHandlers, {
 })
 ~~~
 
-### 实现isProxy和ref功能
+## 实现isProxy和ref功能
 
 isProxy：检查一个object是否是由readonly或者reactive创建出来的
 
@@ -1372,7 +1372,7 @@ export function ref(value) {
 + 与`==`不同，==在判断相等前对两边变量（如果不同类）进行强制转换，Object.is不会强制转换
 + 与`===`不同，差别是对待有符号的零和NaN不同，例如，===认为`+0`和`-0`相等，而将`Number.NaN`与`NaN`视为不等
 
-### 实现工具函数 isRef & unRef
+## 实现工具函数 isRef & unRef
 
 `isRef`
 
@@ -1401,7 +1401,7 @@ export function unRef(ref) {
 }
 ~~~
 
-### 实现proxyRefs功能
+## 实现proxyRefs功能
 
 适用于Vue3 setup中，return的一个对象内部有ref类型数据。但是在template中访问该ref，不需要通过.value在访问值，这一功能就是通过proxyRefs实现的
 
@@ -1441,6 +1441,104 @@ export function proxyRefs(objectWithRefs) {
       }
     }
   });
+}
+~~~
+
+## comouted计算属性
+
+computed 计算属性，相当于ref 有.value，而且最重要的是计算属性有缓存
+
+测试案例
+
+~~~ts
+describe("computed", () => {
+  it("happy path", () => {
+    const user = reactive({
+      age: 1
+    })
+
+    const age = computed(() => {
+      return user.age
+    })
+
+    expect(age.value).toBe(1)
+  })
+
+  it("should compute lazily", () => {
+    const value = reactive({
+      foo: 1
+    })
+    const getter = jest.fn(() => {
+      return value.foo
+    })
+    const cValue = computed(getter)
+
+    // lazy 懒执行，如果没有调用cValue.value，getter不会执行
+    expect(getter).not.toHaveBeenCalled()
+
+    expect(cValue.value).toBe(1)
+    expect(getter).toHaveBeenCalledTimes(1)
+
+    // should not compute again
+    // computed有缓存，当再次调用cValue.value，getter不会被执行
+    cValue.value
+    expect(getter).toHaveBeenCalledTimes(1)
+
+    // should not computed until needed
+    // 当响应式数据发生改变，computed还会执行一遍
+    value.foo = 2  // trigger => effect 
+    expect(getter).toHaveBeenCalledTimes(1)
+    expect(cValue.value).toBe(2)
+
+    // now it should compute
+    expect(cValue.value).toBe(2)
+    expect(getter).toHaveBeenCalledTimes(2)
+
+    // should not computed again
+    cValue.value
+    expect(getter).toHaveBeenCalledTimes(2)
+  })
+})
+~~~
+
+实现：
+
++ computed接受一个函数（getter），当返回computed类型数据的.value时，会返回相应的计算结果，并且该结果有缓存，下次再调用.value，不会触发getter
+  + 在ComputedRefImpl接口中，先利用内部属性接受getter函数返回的值，并用_dirty记录是否有缓存过value，如果缓存过的话，下次直接返回这个value，不再调用getter
++ 当响应式数据改变时，会触发setter，但是由于没有effect过，depsMap是undefined会报错。所以在computed内部要执行ReactiveEffect实例。
+  + 使用_effect保存effect对象，参数为getter函数，get value 时直接运行this.\_effect.run()，这时候会触发响应式数据的getter，初始化depsMap和deps并收集依赖
+  + 当更新响应式数据时，会触发trigger，我们这时候不想再调用effect，因为effect.run()相当于执行comouted中的getter函数，并不会改变computed类中的value。
+    + 使用scheduler，当触发trigger直接执行scheduler，然后将_dirty变为true，下一次访问.value时，就会重新执行computed 的get value并给\_value赋予新的值
+
+~~~ts
+import { ReactiveEffect } from "./effect"
+
+class ComputedRefImpl {
+  private _getter: any
+  private _dirty: boolean = true
+  private _value: any
+  private _effect: ReactiveEffect
+  constructor(getter) {
+    this._getter = getter
+    this._effect = new ReactiveEffect(getter, () => {
+      // 如果有scheduler，trigger不会执行effect，会执行scheduler
+      if (!this._dirty) {
+        this._dirty = true
+      }
+    })
+  }
+
+  get value() {
+    if (this._dirty) {
+      this._dirty = false
+      this._value = this._effect.run()
+    }
+    return this._value
+  }
+}
+
+export function computed(getter) {
+  return new ComputedRefImpl(getter)
 }
 ~~~
 
