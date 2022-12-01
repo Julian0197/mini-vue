@@ -7,6 +7,7 @@ class RefImpl {
   // 和reactive不同的是，只有一个数据，只需要一个仓库存放依赖
   public dep;
   private _rawValue: any;
+  public __v_isRef = true
   constructor(value) {   
     this._rawValue = value
     // 看看value是不是对象，是的话需要reactive包裹
@@ -46,4 +47,13 @@ function trackRefValue(ref) {
 
 export function ref(value) {
   return new RefImpl(value);
+}
+
+export function isRef(value) {
+  return !!value.__v_isRef
+}
+
+export function unRef(ref) {
+  // 看看是不是ref，是的话返回ref.value，不是直接返回值
+  return isRef(ref) ? ref.value : ref;
 }

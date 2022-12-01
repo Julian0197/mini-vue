@@ -1296,10 +1296,74 @@ describe("ref", () => {
 
 
 + 实现一个RefImpl接口，因为只有一个数据所以只需要一个dep存放依赖
+  + 需要判断数据是否为object `Object.is()`，如果是object需要转换为reactive
+  + 初始化dep是一个Set()，dep是public的
+  + set value时候需要比较oldValue和当前value，当前value如果用reactive包裹的话，无法分辨是否一样。使用_rawValue保存原始值，比较原始值和newValue
 
-  
++ ref对象必须返回.value，所以用get value()，在get时候收集依赖
+  + 重构trackEffect，传入参数为dep，需要检测如果当前activeEffect已经收集，就不需要收集，还需要注意反向收集
+  + 如果没有effect过，activeEffect为undefined会报错，所以还要加个判断isTracking，判断是否有activeEffect以及是否通过stop方法终止了依赖收集
+
++ set方法要判断新旧值是否相同，如果不同，才需要改变值，并触发依赖
+  + 比较rawValue和newValue看是否需要set
+  + 修改的话，rawValue赋值newValue
+  + _value还需要判断是否是对象，并进行reactive包裹
+  + 最后触发依赖（也重构过，传入参数dep）
 
 
+~~~ts
+// ref.ts
+
+import { isTracking, trackEffects, trigger, triggerEffects } from "./effect";
+import { reactive } from "./reactive";
+import { hasChanged, isObject } from "./shared";
+
+class RefImpl {
+  private _value: any;
+  // 和reactive不同的是，只有一个数据，只需要一个仓库存放依赖
+  public dep;
+  private _rawValue: any;
+  constructor(value) {   
+    this._rawValue = value
+    // 看看value是不是对象，是的话需要reactive包裹
+    this._value = convert(value)
+
+    this.dep = new Set();
+  }
+  get value() {
+    // 如果没有触发effect()，activeEffect为undefined
+    trackRefValue(this)
+
+    return this._value;
+  }
+
+  set value(newValue) {
+    // 判断newValue是否和旧的value不一样
+    // 这里对比新旧值，是两个object对比，有可能一个是proxy
+    if (!hasChanged(this._rawValue, newValue)) {
+      this._rawValue = newValue
+      this._value = convert(newValue)
+      triggerEffects(this.dep);
+    }
+  }
+}
+
+function convert(value) {
+  return isObject(value) ? reactive(value) : value
+}
+
+
+function trackRefValue(ref) {
+  // 如果没有触发effect()，activeEffect为undefined
+  if (isTracking()) {
+    trackEffects(ref.dep);
+  }
+}
+
+export function ref(value) {
+  return new RefImpl(value);
+}
+~~~
 
 
 
@@ -1307,3 +1371,33 @@ describe("ref", () => {
 
 + 与`==`不同，==在判断相等前对两边变量（如果不同类）进行强制转换，Object.is不会强制转换
 + 与`===`不同，差别是对待有符号的零和NaN不同，例如，===认为`+0`和`-0`相等，而将`Number.NaN`与`NaN`视为不等
+
+### 实现工具函数 isRef & unRef
+
+`isRef`
+
+检查某个值是否为 ref。
+
+只需要在ref接口中添加一个公共参数`__v_isRef = true`
+
+判断是否是ref对象，需要利用`!!`将undefined转化为布尔值
+
+~~~ts
+export function isRef(value) {
+  return !!value.__v_isRef
+}
+~~~
+
+
+
+`unRef`
+
+如果参数是 ref，则返回内部值，否则返回参数本身。这是 `val = isRef(val) ? val.value : val` 计算的一个语法糖。
+
+~~~ts
+export function unRef(ref) {
+  // 看看是不是ref，是的话返回ref.value，不是直接返回值
+  return isRef(ref) ? ref.value : ref;
+}
+~~~
+
