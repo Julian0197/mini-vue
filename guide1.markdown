@@ -1,4 +1,4 @@
-# mini-vue3实现
+# mini-vue3实现（1）
 ## setup环境-集成jest做单元测试
 ### 初始化项目
 + `yarn init -y` 初始化项目
