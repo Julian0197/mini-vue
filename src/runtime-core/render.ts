@@ -1,6 +1,8 @@
 import { createComponentInstance, setupComponent } from "./component";
 
 export function render(vnode, container) {
+  // TODO 判断vnode是element还是component
+
   // 调用patch方法（方便后续递归处理）
   patch(vnode, container);
 }

@@ -226,6 +226,170 @@ function handleSetupResult(instance, setupResult) {
 开始调用vnode中的render函数，处理vnode节点
 
 ~~~ts
-const 
+ const setupRenderEffect = function(instance, container) {
+   // 执行render函数
+   const subTree = instance.render()
+   // 由于执行render后返回依然是一个vnode对象，继续递归调用patch进行处理
+   patch(subTree, container)
+ }
+~~~
+
+## rollup打包库
+
++ `Rollup`是一个模块打包器，和`webpack`类似
++ `Rollup`支持`Tree-shaking`，开元静态分析代码中的`import`，排除不被使用的代码
+  + `webpack`虽然也支持，但是需要我们手动配置
++ 打包的结果比`webpack`小
++ 打包框架/组件库使用`Rollup`更合适
+
+
+
+安装rollup
+
+~~~powershell
+yarn add rollup --dev
+~~~
+
+创建rollup.config.js，配置
+
+~~~js
+import typescript from "@rollup/plugin-typescript";
+
+export default {
+  // 入口文件
+  input: "./src/index.ts",
+  // 出口文件
+  output: [
+    // 1.cjs -> comonjs
+    // 2.esm -> es6模块规范（标准）
+    {
+      format: "cjs",
+      file: "lib/guide-mini-vue.csj.js",
+    },
+    {
+      format: "es",
+      file: "lib/guide-mini-vue.esm.js",
+    },
+  ],
+  /// 安装转译官方插件 ts-->js @rollup/plugin-typescript
+  plugins: [typescript()],
+};
+~~~
+
+在package.json中配置一下rollup命令
+
+-c指定运行的文件
+
+~~~json
+"scripts": {
+    "build": "rollup -c rollup.config.js"
+}
+~~~
+
+同时还需要安装`@rollup/plugin-typescript`，`typescript`,`tslib`相关依赖
+
+
+
+在runtime-core中需要导出createApp和h
+
+~~~ts
+// runtime-core/index.ts
+
+export { createApp } from "./creatApp" 
+export { h } from "./h"
+~~~
+
+在出口文件中把runtime-core中全部导出
+
+~~~ts
+// src/index.ts
+
+export * from './runtime-core/index'
+~~~
+
+之前的流程已经处理，接下来写个hello world，创建exanple/helloworld
+
+App.js
+
+```js
+import { h } from '../../lib/mini-vue.esm.js'
+ 
+export const App = {
+  render() {
+    return h("div", "hi, " + this.msg)
+  },
+
+  setup() {
+    // composition api
+
+    return {
+      msg: 'mini-vue'
+    }
+  }
+}
+```
+
+index.html
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>mini-vue</title>
+</head>
+<body>
+    <div id="app"></div>
+    <script src="main.js" type="module"></script>
+</body>
+</html>
+```
+
+main.js
+
+```js
+import { createApp } from "../../lib/mini-vue.esm.js"
+import { App } from "./App.js"
+
+const rootContainer = document.querySelector("#app")
+createApp(App).mount(rootContainer)
+```
+
+到此为止，最基本的框架搭建完成。
+
+我们运行index.html，报错instance.render不是一个function
+
+<img src="C:\Users\MSK\AppData\Roaming\Typora\typora-user-images\image-20221204205102827.png" alt="image-20221204205102827" style="zoom:50%;" />
+
+原因：
+
+在main.js中，`creatApp(App).mount(rootContainer)`会调用`render`，再调用`patch`，调用其他函数之后，还会递归调用patch处理，此时patch处理的不是组件而是element（`div`），此时并没有render这个函数，所以报错。后续针对`render`要区分`element`和`component`
+
+**路径优化：**
+
+在package.json中配置esm和cjs的入口
+
+~~~json
+"main": "lib/mini-vue.cjs.js",
+"moudle": "lib/mini-vue.esm.js"
+~~~
+
+~~~js
+import pkg from './package.json'
+
+  output: [
+    // 1.cjs -> comonjs
+    // 2.esm -> es6模块规范（标准）
+    {
+      format: "cjs",
+      file: "pkg.main",
+    },
+    {
+      format: "es",
+      file: "pkg.moudle",
+    },
+  ], 
 ~~~
 
