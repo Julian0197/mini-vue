@@ -484,9 +484,174 @@ function mountChildren(vnode: any, container: any) {
 }
 ~~~
 
-
-
 ## 实现组件代理对象
+
+~~~js
+export const App = {
+  render() {
+    return h("div", {
+      id: "root",
+      class: ["red", "hard"],
+    },
+      // 在render中使用setup的数据
+      "Hi, " + this.msg
+    )
+  },
+  setup() {
+    return {
+      msg: 'mini-vue'
+    }
+  }
+}
+~~~
+
+接下来要在render函数中**通过this访问setup中的msg**：在执行render函数时，将this绑定到setup函数返回的对象上(`setupState`)。
+
+除此之外，我们没有再setup()中定义`$el`，但是vue3提供了`this.$el`用于访问组件实例管理的DOM根节点。
+
+`$el`：直到组件挂载完成之前都是`undefined`
+
++ 对于单一根元素的组件，`$el`指向根元素
++ 对于以文本节点为根的组件，`$el` 将会指向该文本节点。
++ 对于以多个元素为根的组件，`$el` 将是一个仅作占位符的 DOM 节点，Vue 使用它来跟踪组件在 DOM 中的位置 (文本节点或 SSR 激活模式下的注释节点)。
+
+**解决方法：**
+
+这里用到了代理对象`Proxy`，我们需要通过this访问到`setupState`中的data以及`$el`、`$data`等相关属性。
+
++ 在组件初始化时创建代理对象
++ 在调用render函数时，将proxy绑定到render函数的this上
+
+
+
+首先在mountComponent中处理setup时，在函数setupStatefulComponent中，我们拿到了setup函数返回的对象。同时，生成组件实例的代理对象，这里的组件实例就是app处理后的虚拟节点。
+
+在Proxy中的handler对象中的get函数里，针对要访问的key进行返回值。因为我们将handler函数封装，所以要传入一个instance。
+
+~~~ts
+// component.ts
+
+function setupStatefulComponent(instance: any) {
+  // 先拿setup的返回值
+  const Component = instance.type;
+
+  instance.proxy = new Proxy(
+    {_: instance}, 
+    PublicInstanceProxyHandlers
+  )
+
+  const { setup } = Component;
+
+  if (setup) {
+    // setup可以返回obj或者function
+    const setupResult = setup();
+    handleSetupResult(instance, setupResult);
+  }
+}
+~~~
+
+单独封装代理对象的handler对象。利用map对象保存\$el,$data等属性，写成函数形式。
+
++ 如果是setup函数中的值，返回instance.setupState[key]
+
++ 如果是`$el`等属性，返回instance.vnode.el，这里instance是组件实例（具有vnode，type，setupState属性）
+
+~~~ts
+// 利用map对象保存$el,$data等属性
+const publicPropertiesMap = {
+  // 写成函数形式
+  $el: (i) => i.vnode.el
+}
+
+
+export const PublicInstanceProxyHandlers = {
+  get({_: instance}, key) {
+    // setupState
+    const { setupState } = instance;
+    if (key in setupState) {
+      return setupState[key];
+    }
+
+    const publicGetter = publicPropertiesMap[key]
+    if (publicGetter) {
+      return publicGetter(instance)
+    }
+  }
+}
+~~~
+
+
+
+前面提到访问`$el`，通过`return instance.vnode.el`实现的，所以在创建component实例时，要初始化一个el值。
+
+~~~ts
+// vnode.ts
+
+export function createVNode(type, props?, children?) { // ?表示可选参数
+  const vnode = {
+    type,
+    props,
+    children,
+    el: null,
+  };
+
+  return vnode
+}
+~~~
+
+接下来要考虑什么时候给vnode.el赋值，我们的`el`是组件的根节点，他不是component而是elment，所以是在mountElement中获取的。注意这里的vnode是app的vnode，我们将后续的`vnode`用`initialVnode`代替，使得代码结构更清晰。
+
+~~~ts
+function mountElement(vnode: any, container: any) {
+  // 创建一个element,保存到vnode中
+  const el = (vnode.el = document.createElement(vnode.type))
+
+  // string array children是render函数返回的第三个参数
+  const {children} = vnode;
+  if (typeof children === 'string') {
+    el.textContent = children;
+  } else if (Array.isArray(children)) {
+    mountChildren(vnode, el)
+  }
+
+  // props
+  const {props} = vnode;
+  for (const key in props) {
+    const val = props[key];
+    el.setAttribute(key, val)
+  }
+
+  container.append(el)
+}
+~~~
+
+
+
+当我们执行render App时，执行到mountComponent时，需要创建组件实例，处理setup，继续处理render。此时执行render函数，再执行h函数得到`subTree`（这是新的虚拟节点），这个时候再对subTree进行patch，然后再执行`mountElement`，在这个函数中我们给subTree虚拟节点的el赋予正确的el（这里是`div`），执行完subTree的patch后，给我们的initialVnode.el也就是app的vnode.el赋予subTree的el。`initialVnode.el = subTree.el`
+
+我们在render函数中利用`this.XXX`访问相关属性，所以执行render函数时，使用`call`绑定我们的额代理对象：`const subTree = instance.render.call(proxy)`
+
+~~~ts
+function setupRenderEffect(instance: any, initialVnode: any, container: any) {
+  const { proxy } = instance;
+  
+  // 执行render函数
+  const subTree = instance.render.call(proxy);
+  // 由于执行render后返回依然是一个vnode对象，继续递归调用patch处理
+  patch(subTree, container);
+  // patch对h函数返回的vnode进行处理（这里就是subTree）
+  // 在执行mountElement后，subTree.el已经赋好值了，这个时候再把值给vnode.el
+  initialVnode.el = subTree.el
+}
+~~~
+
+
+
+至此实现了组件化代理对象
+
+测试的时候，我们再app.js中，先执行`window.self = null`，在render函数中在给他赋予当前render函数中的this：`window.self = this`，我们希望这个this是我们组件实例的代理对象`proxy`。
+
+<img src="C:\Users\MSK\AppData\Roaming\Typora\typora-user-images\image-20221206225652014.png" alt="image-20221206225652014" style="zoom:43%;" />
 
 ## 实现shapeFlags
 

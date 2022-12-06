@@ -22,8 +22,8 @@ function processElement(vnode: any, container: any) {
 }
 
 function mountElement(vnode: any, container: any) {
-  // 创建一个element
-  const el = document.createElement(vnode.type)
+  // 创建一个element,保存到vnode中
+  const el = (vnode.el = document.createElement(vnode.type))
 
   // string array children是render函数返回的第三个参数
   const {children} = vnode;
@@ -56,20 +56,25 @@ function processComponent(vnode: any, container: any) {
   mountComponent(vnode, container);
 }
 
-function mountComponent(vnode, container) {
+function mountComponent(initialVnode: any, container: any) {
   // 创建组件实例
-  const instance = createComponentInstance(vnode);
+  const instance = createComponentInstance(initialVnode);
   // 处理setup
   setupComponent(instance);
   // 处理render
-  setupRenderEffect(instance, container);
+  setupRenderEffect(instance, initialVnode, container);
 }
 
-function setupRenderEffect(instance, container) {
+function setupRenderEffect(instance: any, initialVnode: any, container: any) {
+  const { proxy } = instance;
+  
   // 执行render函数
-  const subTree = instance.render();
+  const subTree = instance.render.call(proxy);
   // 由于执行render后返回依然是一个vnode对象，继续递归调用patch处理
   patch(subTree, container);
+  // patch对h函数返回的vnode进行处理（这里就是subTree）
+  // 在执行mountElement后，subTree.el已经赋好值了，这个时候再把值给vnode.el
+  initialVnode.el = subTree.el
 }
 
 
