@@ -1,4 +1,4 @@
-# mini-vue3实现（2）
+# 渲染器首次渲染流程
 ## 实现初始化component主流程
 
 先看看，vue3中初始绑定html的写法
@@ -392,4 +392,101 @@ import pkg from './package.json'
     },
   ], 
 ~~~
+
+## 初始化element主流程
+
+当我们`createApp(app).mount(rootContainer)`后，会将app变成vnode，并调用其中的render函数，render函数在处理render时，执行`setupRenderEffect`返回的值还是vnode会再调用patch函数，但是**此时的vnode不是component而是element**，这里要进行区分。
+
+~~~js
+  render() {
+    return h("div", {
+      id: "root",
+      class: ["red", "hard"],
+    },
+      // "hi, mini-vue"  children是简单的string类型
+      [h("p", {class: "red"}, "hi"), h("p", {class: "blue"}, "mini-vue")]
+    )
+  },
+~~~
+
+### h函数
+
+h函数同样是返回一个vnode，参数也是type、porps和children
+
+~~~ts
+ const h = function(type, props, children) {
+   return createVNode(type, props, children)
+ }
+~~~
+
+### 修改patch中处理element
+
++ 从`vnode.type`区分到底是element还是component
+
+  + string类型 => element，object => component
+
++ processElement中调用mountElement
+
+  + `document.createElement(vnode.type)`创建一个el
+
+  + `const {children, props} = vnode`解构一下vnode
+
+  + 如果children是string，直接`el.textContent = children`，如果children是数组，还需要递归调用patch，注意此时patch的container参数是当前的el
+
+  + 遍历props，利用`el.setArrtibute(key, value)`赋予属性
++ `container.append(el)`最后把当前el添加到container容器中（这里container是app组件）
+
+    
+
+~~~ts
+function patch(vnode, container) {
+  // 判断vnode是element还是component
+  if (typeof vnode.type === "string") {
+    // 处理element（vnode.type = div）
+    processElement(vnode, container);
+  } else if (isObject(vnode.type)) {
+    // 处理组件
+    processComponent(vnode, container);
+  }
+}
+
+function processElement(vnode: any, container: any) {
+  mountElement(vnode, container)
+}
+
+function mountElement(vnode: any, container: any) {
+  // 创建一个element
+  const el = document.createElement(vnode.type)
+
+  // string array children是render函数返回的第三个参数
+  const {children} = vnode;
+  if (typeof children === 'string') {
+    el.textContent = children;
+  } else if (Array.isArray(children)) {
+    mountChildren(vnode, el)
+  }
+
+  // props
+  const {props} = vnode;
+  for (const key in props) {
+    const val = props[key];
+    el.setAttribute(key, val)
+  }
+
+  container.append(el)
+}
+
+function mountChildren(vnode: any, container: any) {
+      // array里每一个都是虚拟节点
+      vnode.children.forEach((v) => {
+        patch(v, container)
+      })
+}
+~~~
+
+
+
+## 实现组件代理对象
+
+## 实现shapeFlags
 

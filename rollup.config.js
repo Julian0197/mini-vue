@@ -10,11 +10,11 @@ export default {
     // 2.esm -> es6模块规范（标准）
     {
       format: "cjs",
-      file: "pkg.main",
+      file: pkg.main,
     },
     {
       format: "es",
-      file: "pkg.moudle",
+      file: pkg.moudle,
     },
   ],
   /// 安装转译官方插件 ts-->js @rollup/plugin-typescript
