@@ -3,7 +3,8 @@ import { hasOwn } from "../shared";
 // 利用map对象保存$el,$data等属性
 const publicPropertiesMap = {
   // 写成函数形式
-  $el: (i) => i.vnode.el
+  $el: (i) => i.vnode.el,
+  $slots: (i) => i.slots
 }
 
 

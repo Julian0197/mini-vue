@@ -20,48 +20,46 @@ function patch(vnode, container) {
 }
 
 function processElement(vnode: any, container: any) {
-  mountElement(vnode, container)
+  mountElement(vnode, container);
 }
 
 function mountElement(vnode: any, container: any) {
   // 创建一个element,保存到vnode中
-  const el = (vnode.el = document.createElement(vnode.type))
+  const el = (vnode.el = document.createElement(vnode.type));
 
   // string array    children是render函数返回的第三个参数
-  const {children, shapeFlag} = vnode;
+  const { children, shapeFlag } = vnode;
   if (shapeFlag & ShapeFlags.TEXT_CHILDREN) {
     el.textContent = children;
   } else if (shapeFlag & ShapeFlags.ARRAY_CHILDREN) {
-    mountChildren(vnode, el)
+    mountChildren(vnode, el);
   }
 
   // props
-  const {props} = vnode;
+  const { props } = vnode;
   for (const key in props) {
     const val = props[key];
-    
+
     // 确认规范 on + Event name，使用正则表达式
     const isOn = (key: string) => /^on[A-Z]/.test(key);
     if (isOn(key)) {
       // 'onClick'第二位之后的是event name
-      const event = key.slice(2).toLowerCase()
-      el.addEventListener(event, val)
+      const event = key.slice(2).toLowerCase();
+      el.addEventListener(event, val);
     } else {
-      el.setAttribute(key, val)
-    }  
+      el.setAttribute(key, val);
+    }
   }
 
-  container.append(el)
+  container.append(el);
 }
 
 function mountChildren(vnode: any, container: any) {
-      // array里每一个都是虚拟节点
-      vnode.children.forEach((v) => {
-        patch(v, container)
-      })
+  // array里每一个都是虚拟节点
+  vnode.children.forEach((v) => {
+    patch(v, container);
+  });
 }
-
-
 
 function processComponent(vnode: any, container: any) {
   mountComponent(vnode, container);
@@ -78,14 +76,12 @@ function mountComponent(initialVnode: any, container: any) {
 
 function setupRenderEffect(instance: any, initialVnode: any, container: any) {
   const { proxy } = instance;
-  
+
   // 执行render函数
   const subTree = instance.render.call(proxy);
   // 由于执行render后返回依然是一个vnode对象，继续递归调用patch处理
   patch(subTree, container);
   // patch对h函数返回的vnode进行处理（这里就是subTree）
   // 在执行mountElement后，subTree.el已经赋好值了，这个时候再把值给vnode.el
-  initialVnode.el = subTree.el
+  initialVnode.el = subTree.el;
 }
-
-
