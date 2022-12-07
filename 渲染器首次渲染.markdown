@@ -920,8 +920,169 @@ export const PublicInstanceProxyHandlers = {
 }
 ~~~
 
-
-
 至此，props功能实现
 
 <img src="C:\Users\MSK\AppData\Roaming\Typora\typora-user-images\image-20221207151550930.png" alt="image-20221207151550930" style="zoom:50%;" />
+
+## 实现组件 emit 功能
+
+vue3中的`emit`用于在子组件内触发父组件传递的函数，可以在`setup`函数中的第二个参数中结构获取，`emit`是一个函数，用于指定函数名传递参数并触发函数。
+
+~~~js
+ const App = {
+   setup(props, { emit }) {
+     // 触发父组件传递的add函数
+     emit('add', 1, 2)
+   }
+ }
+~~~
+
+我们重新写一个测试案例，测试emit的使用
+
+App组件中，有子组件Foo，并向Foo中的第二个参数也就是props参数传递了两个函数
+
+~~~ts
+export const App = {
+  name: "App",
+  render() {
+    // emit
+    return h("div", {}, [
+      h("div", {}, "App"),
+      h(Foo, {
+        // on + Event
+        onAdd(a, b) {
+          console.log("onAdd",a, b);
+        },
+        // add-foo => addFoo
+        onAddFoo(a, b) {
+          console.log("onAddFoo", a, b);
+        }
+      }),
+    ]);
+  },
+
+  setup() {
+    return {};
+  },
+};
+~~~
+
+在子组件Foo中，又包含了一个element，是一个button，点击button后触发emitAdd函数，在这个函数中使用`emit`触发App父组件传递的函数，并传入值。
+
+~~~ts
+export const Foo = {
+  setup(props, { emit }) {
+    const emitAdd = () => {
+      emit("add", 1, 2);
+      emit("add-foo", 3, 4)
+    };
+
+    return {
+      emitAdd,
+    };
+  },
+
+  render() {
+    const btn = h(
+      "button",
+      {
+        onClick: this.emitAdd,
+      },
+      "emitAdd"
+    );
+
+    const foo = h("p", {}, "foo");
+    return h("div", {}, [foo, btn]);
+  },
+};
+~~~
+
+我们在setup中结构emit：`setup(props, { emit })`，因此在setupComponent中调用setup时要传入`emit`。
+
+给组件实例初始化emit值，再调用setup函数时，传入emit属性
+
+注意：emit函数要接受instance，但是用户写的时候不会传入，所以使用bind直接传入当前组件实例
+
+~~~ts
+// component.ts
+export function createComponentInstance(vnode) {
+  const component = {
+    vnode,
+    type: vnode.type,
+    setupState: {},
+    props: {},
+    emit: () => {},
+  };
+
+  // 使用bind预先传入insance，emit函数只需要传入对应事件
+  component.emit = emit.bind(null, component) as any;
+  return component;
+}
+
+
+
+function setupStatefulComponent(instance: any) {
+  // ...
+  const { setup } = Component;
+
+  if (setup) {
+    // setup可以返回obj或者function
+    // 这里传入props
+    const setupResult = setup(shallowReadonly(instance.props), {
+      emit: instance.emit,
+    });  
+    handleSetupResult(instance, setupResult);
+  }
+}
+~~~
+
+
+
+我们仍然单独封装处理emit的函数，需要解构instance中的props，接受用户传入的event以及参数
+
+~~~ts
+// componentEmit.ts
+import { camelize, toHandlerKey } from "../shared";
+
+export const emit = (instance, event, ...args) => {  
+  const { props } = instance
+
+  // 子组件中调用emit('add')，传入add，实际调用的是onAdd
+  // 子组件中调用emit('add-foo')，传入add-foo，实际调用的是onAddFoo
+  const handlerName = toHandlerKey(camelize(event))
+  const handler = props[handlerName]
+  handler && handler(...args);
+}
+~~~
+
+最后需要根据接受的event参数，返回相应props中的函数执行。
+
+我们继续封装起来。
+
+~~~ts
+// 首字母大写 add => Add
+export const capitalize = (str: string) => {
+  return str.charAt(0).toUpperCase() + str.slice(1);
+};
+
+// 转化为驼峰命名格式 add-foo => addFoo
+export const camelize = (str: string) => {
+  // _是"-foo"，c是"foo"，就是把-foo替换为Foo
+  return str.replace(/-(\w)/g, (_, c: string) => {
+    return c ? c.toUpperCase() : "";
+  });
+};
+
+export const toHandlerKey = (str: string) => {
+  return str ? "on" + capitalize(str) : "";
+};
+~~~
+
+子组件中调用emit('add')，传入add，实际调用的是onAdd
+子组件中调用emit('add-foo')，传入add-foo，实际调用的是onAddFoo
+
+
+
+至此，emit功能实现完毕。
+
+<img src="C:\Users\MSK\AppData\Roaming\Typora\typora-user-images\image-20221207165044682.png" alt="image-20221207165044682" style="zoom:50%;" />
