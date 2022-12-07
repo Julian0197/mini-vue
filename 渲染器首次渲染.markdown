@@ -788,3 +788,140 @@ function patch(vnode, container) {
   }
 ~~~
 
+## 实现组件的 props
+
+`props`用于父组件给子组件传值
+
+注意：`component`类型的vnode中的`props`是用作为参数传递给`setup`函数的。`element`类型的vnode中的`props`用于设置当前el的`DOM属性`（比如class，事件）
+
+
+
+先创建一个子组件嵌套，App组件中嵌套了子组件Foo，并给Foo传入了一个对象`{count: 7}`，我们希望：
+
++ 在子组件的`setup`中可以访问到父组件传递的对象（props）
++ 在子组件中可以通过`this`访问到props中的属性
++ 将父组建传递的props对象设置为`shallowReadonly`（浅只读），修改第一层会报错
+
+~~~ts
+
+export const App = {
+  render() {
+    window.self = this
+    return h("div", 
+    {
+      id: "root",
+    },
+      [
+        h(Foo, {
+          count: 7,
+        }),
+      ]
+    )
+  },
+
+  setup() {}
+}
+
+const Foo = {
+  setup(props) {
+    // props.count
+    console.log(props);
+
+    // props不可被修改 readonly
+    props.count += 2;
+    console.log(props);
+  },
+  render() {
+    return h("div", {}, "foo: " + this.count);
+  },
+};
+~~~
+
+
+
+实现initProps，传入参数为当前组件实例，props对象为组件实例vnode中的props属性（instance是Foo，instance.vnode.props是{count: 7}）
+
+~~~ts
+// component.ts
+
+export function setupComponent(instance) {
+  // TODO
+  // initSlots()
+  initProps(instance, instance.vnode.props)
+  
+  setupStatefulComponent(instance);
+}
+~~~
+
+单独封装处理组件props的功能
+
+~~~ts
+// componentProps.ts
+
+export function initProps(instance, rawProps) {
+  // app组件没有父组件传入的props，此时会报错
+  instance.props = rawProps || {}
+
+  // TODO attrs
+}
+~~~
+
+在执行setup时候将props传入，并且包装成shallowReadonly
+
+~~~ts
+
+function setupStatefulComponent(instance: any) {
+  // ...
+
+  const { setup } = Component;
+
+  if (setup) {
+    // setup可以返回obj或者function
+    // 这里传入props
+    const setupResult = setup(shallowReadonly(instance.props));  // 这里对于app，props是undeifned
+    handleSetupResult(instance, setupResult);
+  }
+}
+~~~
+
+这里注意：因为App组件没有props属性，所以instance.props传入的是undefined，而shallowReadonly传入一个undefined会报错。所以在initProps时，如果没有props，给他赋`{}`。
+
+~~~ts
+function createReactiveObject(target: any, baseHandlers) {
+  // 判断传入的target是不是对象
+  if (!isObject(target)) {
+    console.warn(`target ${target} 必须是一个对象`)
+    return target
+  }
+
+  return new Proxy(target, baseHandlers);
+}
+~~~
+
+最后要通过this访问到props的属性，所以需要改写组件代理对象的getter函数
+
+~~~ts
+// componentPublicInstance.ts
+
+export const PublicInstanceProxyHandlers = {
+  get({_: instance}, key) {
+    // setupState
+    const { setupState, props } = instance;
+    
+    // hasOwn判断当前key在不在setupState或者props上
+    const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key)
+    if (hasOwn(setupState, key)) {
+      return setupState[key]
+    } else if (hasOwn(props, key)) {
+      return props[key]
+    }
+
+	// ...
+}
+~~~
+
+
+
+至此，props功能实现
+
+<img src="C:\Users\MSK\AppData\Roaming\Typora\typora-user-images\image-20221207151550930.png" alt="image-20221207151550930" style="zoom:50%;" />
