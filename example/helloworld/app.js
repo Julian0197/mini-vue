@@ -7,6 +7,12 @@ export const App = {
     return h("div", {
       id: "root",
       class: ["red", "hard"],
+      onClick() {
+        console.log("click")
+      },
+      onMousedown() {
+        console.log("mousedown")
+      }
     },
       // "hi, mini-vue"  // children是简单的string类型
       // [h("p", {class: "red"}, "hi"), h("p", {class: "blue"}, "mini-vue")]

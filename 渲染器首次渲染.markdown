@@ -739,3 +739,52 @@ function patch(vnode, container) {
 }
 ~~~
 
+## 实现事件注册
+
+实现以下事件注册
+
+~~~ts
+// render.ts
+
+  render() {
+    window.self = this
+    return h("div", {
+      id: "root",
+      class: ["red", "hard"],
+      onClick() {
+        console.log("click")
+      },
+      onMousedown() {
+        console.log("mousedown")
+      }
+~~~
+
+
+
+在mountElement时，处理props时（vnode对象的第二个属性），注册事件。
+
+由于注册事件函数都是 on + Event name的形式，用正则表达式判断当前key是否是注册事件：`const isOn = (key: string) => /^on[A-Z]/.test(key);`
+
+使用`el.addEventListener(event, val)`添加事件，其中event是`key.slice(2).toLowerCase()`
+
+~~~ts
+//render.ts
+
+// mountElement函数
+// props
+  const {props} = vnode;
+  for (const key in props) {
+    const val = props[key];
+    
+    // 确认规范 on + Event name，使用正则表达式
+    const isOn = (key: string) => /^on[A-Z]/.test(key);
+    if (isOn(key)) {
+      // 'onClick'第二位之后的是event name
+      const event = key.slice(2).toLowerCase()
+      el.addEventListener(event, val)
+    } else {
+      el.setAttribute(key, val)
+    }  
+  }
+~~~
+
