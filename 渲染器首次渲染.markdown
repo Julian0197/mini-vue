@@ -1393,3 +1393,82 @@ function processText(vnode: any, container: any) {
 
 至此text类型节点实现完毕。
 
+## 实现getCurrentInstance
+
+我们想要在组件的setup函数中，访问到当前组件的instance
+
+~~~js
+// App.js
+
+export const App = {
+  name: "App",
+  render() {
+    return h("div", {}, [h("p", {}, "currentInstance demo"), h(Foo)])
+  },
+
+  setup() {
+    const instance = getCurrentInstance()
+    console.log("App:", instance);
+    return {};
+  },
+};
+~~~
+
+~~~js
+// Foo.js
+
+export const Foo = {
+  name: "Foo",
+  setup() {
+    const instance = getCurrentInstance()
+    console.log("Foo:", instance);
+    return {};
+  },
+
+  render() {
+    return h("div", {}, "foo")
+  },
+};
+~~~
+
+我们定义一个函数getCurrentInstance来获取当前组件实例
+
+需要再setup中获取，setup结束前将currentInstance设置为null
+
+利用函数封装`currentInstance = xxx`避免不必要的改动
+
+~~~ts
+// component.ts
+
+if (setup) {
+    // 拿到当前的组件实例对象
+    setCurrentInstance(instance)
+
+    // setup可以返回obj或者function
+    // 这里传入props
+    const setupResult = setup(shallowReadonly(instance.props), {
+      emit: instance.emit,
+    });  
+
+    setCurrentInstance(null);
+
+    handleSetupResult(instance, setupResult);
+  }
+~~~
+
+~~~ts
+// component.ts
+
+let currentInstance = null;
+
+export function getCurrentInstance() {
+  return currentInstance
+}
+
+export function setCurrentInstance(instance) {
+  currentInstance = instance
+}
+~~~
+
+最后在runtime-core的index.ts中导出，getCurrentInstance，rollup会将这个函数打包。
+
