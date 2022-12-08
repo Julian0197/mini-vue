@@ -1472,3 +1472,182 @@ export function setCurrentInstance(instance) {
 
 最后在runtime-core的index.ts中导出，getCurrentInstance，rollup会将这个函数打包。
 
+## 实现provide/inject功能
+
+vue中的`provide/inject`可以实现跨层级组件通信，前面实现的`props`
+
+适用于父子组件通信。
+
+现在使用一对 `provide` 和 `inject`。无论组件层次结构有多深，父组件都可以作为其所有子组件的依赖提供者。这个特性有两个部分：父组件有一个 `provide` 选项来提供数据，子组件有一个 `inject` 选项来开始使用这些数据。
+
+<img src="https://p9-juejin.byteimg.com/tos-cn-i-k3u1fbpfcp/64782990ebcd4c1d96638daf7e84ab64~tplv-k3u1fbpfcp-zoom-in-crop-mark:4536:0:0:0.awebp?" alt="webp.png" style="zoom:63%;" />
+
+下面是我们的测试案例：
+
+总共有三个组件：`Father`,`Son`,`GrandSon`层层嵌套
+
+1. Father provide foo和bar
+2. Son provide foo并inject foo
+3. GrandSon inject foo,bar,baz,ff
+
+我们希望：Son能接收到Father提供的foo；GrandSon接受到的Son的foo；同时对于没有提供的变量，会返回默认值。
+
+~~~js
+// App.js
+
+const Father = {
+  name: "Father",
+  setup() {
+    provide("foo", "fooVal-father");
+    provide("bar", "barVal-father");
+  },
+  render() {
+    return h("div", {}, [h("p", {}, "Father"), h(Son)]);
+  },
+};
+
+const Son = {
+  name: "Son",
+  setup() {
+    provide("foo", "fooVal-son");
+    const foo = inject("foo");
+    return {
+      foo,
+    };
+  },
+  render() {
+    return h("div", {}, [
+      h("p", {}, `Son获取Farher: -${this.foo}`),
+      h(GrandSon),
+    ]);
+  },
+};
+
+const GrandSon = {
+  name: "GrandSon",
+  setup() {
+    const foo = inject("foo");
+    const bar = inject("bar");
+    const baz = inject("baz", "defaultBaz");
+    const ff = inject("ff", () => "ffDefault");
+
+    return {
+      foo,
+      bar,
+      baz,
+      ff,
+    };
+  },
+  render() {
+    return h(
+      "div",
+      {},
+      `GrandSon获取Father: -${this.foo} - ${this.bar} - ${this.baz} - ${this.ff}`
+    );
+  },
+};
+
+export default {
+  name: "App",
+  setup() {},
+  render() {
+    return h("div", {}, [h("p", {}, [h("p", {}, "apiInject"), h(Father)])]);
+  },
+};
+~~~
+
+
+
+首先在组件实例中，添加`provides`和`parent`属性，parent属性指向当前组件父级：这里要修改很多，vscode使用`F8`就能找到报错代码，一步步修改。注意两点：
+
++ 一开始patch，parent为null
++ 在`setupRenderEffect`中patch子组件时，parent就是当前的`instance`
+
+将`provides`的属性指向`parent.provides`，目的是为了实现跨层级访问
+
+​	
+
+~~~ts
+// component.ts
+
+ const createComponentInstance = function (vnode, parent) { // 修改
+   const component = {
+     vnode,
+     type: vnode.type,
+     props: {},
+     setupState: {},
+     // 添加provides
+     provides: parent ? parent.provides : {}, // 修改
+     // 添加parent，用于保存父级component实例
+     parent: parent ? parent : {}, // 修改
+     slots: {},
+     emit: () => {} 
+   }
+ 
+   component.emit = emit.bind(null, component)
+ 
+   return component
+ }
+~~~
+
+单独封装`apiInject`处理`provide/inject`
+
+通过`getCurrentInstance`获取当前`instance`，注意instance只能在`setup`中获取。
+
+在provide函数中，拿到当前instance的provides和parent的provides，如果两者相同，说明在该组件中还没有provide新的值，初始化`currentInstance.provides`为空对象，并将它的原型对象指向`parent.provides`：利用`provides = currentInstance.provides = Object.create(parentProvides);`
+
+**注意：**`provides = currentInstance.provides`，由于provides是ES6解构出来的，他是一个新的变量对解构对象有一层浅拷贝，所以当我们修改了对象的数据，provides的值也需要再重新引用。
+
+~~~ts
+import { getCurrentInstance } from "./component";
+
+export function provide(key, value) {
+  // 父组件存储数据
+  const currentInstance: any = getCurrentInstance(); // 只有在setup内部使用
+
+  if (currentInstance) {
+    // ES6对象结构，创建一个新变量provides，浅拷贝对象的属性
+    let { provides } = currentInstance;
+    // 拿到父亲的provides
+    const parentProvides = currentInstance.parent.provides;
+    // 初始化状态：说明当前provides还没有赋值
+    if (provides === parentProvides) {
+      // 当前组件provides变成了一个空对象，且原型指向parentProvides
+      provides = currentInstance.provides = Object.create(parentProvides);
+    }
+    provides[key] = value;
+  }
+}
+~~~
+
+在inject函数中，只需要拿到当前实例的父亲的provides，按要求返回值。
+
+添加一个`defaultValue`参数，接受默认值或者函数
+
+~~~ts
+export function inject(key, defaultValue) {
+  // 子孙组件获取数据
+  const currentInstance: any = getCurrentInstance();
+
+  // 这个if判断当前是在setup中
+  if (currentInstance) {
+    const parentProvides = currentInstance.parent.provides;
+
+    if (key in parentProvides) {
+      return parentProvides[key];
+    } else if (defaultValue) {
+      if (typeof defaultValue === 'function') {
+        return defaultValue()
+      } else {
+        return defaultValue
+      }
+    }  
+  }
+}
+~~~
+
+记得在runtime-core的index.ts中导出这两个函数
+
+至此，`provide/inject`功能实现完毕
+
+<img src="C:\Users\MSK\AppData\Roaming\Typora\typora-user-images\image-20221208222928786.png" alt="image-20221208222928786" style="zoom:40%;" />
