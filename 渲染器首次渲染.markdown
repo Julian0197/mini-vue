@@ -1081,11 +1081,9 @@ export const toHandlerKey = (str: string) => {
 子组件中调用emit('add')，传入add，实际调用的是onAdd
 子组件中调用emit('add-foo')，传入add-foo，实际调用的是onAddFoo
 
-
+<img src="C:\Users\MSK\AppData\Roaming\Typora\typora-user-images\image-20221207165044682.png" alt="image-20221207165044682" style="zoom:50%;" />
 
 至此，emit功能实现完毕。
-
-<img src="C:\Users\MSK\AppData\Roaming\Typora\typora-user-images\image-20221207165044682.png" alt="image-20221207165044682" style="zoom:50%;" />
 
 ## 实现组件slots功能
 
@@ -1114,6 +1112,34 @@ export const toHandlerKey = (str: string) => {
 ~~~
 
 <img src="https://cn.vuejs.org/assets/slots.dbdaf1e8.png" alt="插槽图示" style="zoom:40%;" />
+
+___
+
+
+~~~js
+// App.js
+import Foo from 'Foo.js'
+const App = {
+    render() {
+        const app = h("div", {}, "App")
+        const foo = h(Foo, {}, h("div", {}, "slot"))
+        return h("div", {}, [app, foo])
+    }
+}
+
+// Foo.js
+const Foo = {
+    render() {
+        return h("div", {})
+    }
+}
+~~~
+
+createApp => mount => createVNode(App)，这个时候App的vnode只有type属性 => render => patch => processComponent因为type不是字符串 => mountComponent => createComponentInstance创建了当前组件instance => setupComponent 把setup返回值加入到instance的setupState属性中。创建了当前app实例的proxy => setupRenderEffect => 拿到app实例的proxy，执行app自定义的render函数，render函数中this指向proxy，App的render函数通过h生成了两个vnode（app和Foo）。其中app的type和children是字符串，foo的type是component，children是array。render函数又返回了一个vnode，type是div，children是数组里面包含两个vnode对象。 => patch(render函数返回的vnode，容器是App) => processElement => mountElement 创建了el保存到当前vnode中，el是当前vnode的type，也就是div => mountChildren => patch(app)和patch(foo),这里写一下patch(foo) => foo vnode的type是component => processComponent => mountComponent => createComponentInstance 创建foo的组件实例 => setupComponent foo组件实例的render = Foo组件中的render函数 => setupRenderEffect 执行Foo的render函数，返回了一个vnode `h("div", {})`空的div。
+
+所以在执行Foo的render函数时无法拿到App父组件中`const foo = h(Foo, {}, h("div", {}, "slot"));`赋予的children
+___
+
 
 由于目前还未实现模板编译功能，只能在`h`函数中使用：
 
@@ -1240,3 +1266,130 @@ function normalizeSlotValue(value) {
 ~~~
 
 至此，slot的功能实现完毕。
+
+## 实现Fragment和Text类型节点
+
+在实现上一节`slot`功能时，利用`createVNode("div", {}, slot(props))`实现，需要包裹一层div，并把插槽部分放在children中（针对数组）。我们并不想要插槽外部还有一层div包裹。
+
+我们将renderSlot中的type设置为Fragment
+
+~~~Ts
+// renderSlot
+export function renderSlots(slots, name, props) {
+  const slot = slots[name]
+  if (slot) {
+    if (typeof slot === 'function') {
+      return createVNode(Fragment, {}, slot(props))
+    }
+  }
+}
+~~~
+
+在patch时，在区分type类型为Fragment类型的情况，以后可能还有其他特殊类型要添加，所以这里有switch实现
+
+~~~ts
+// render.ts
+
+function patch(vnode, container) {
+  const { type, shapeFlag } = vnode;
+
+  // Fragment => 只渲染 children
+  switch (type) {
+    case Fragment:
+      processFragment(vnode, container)
+      break;
+
+    default:
+      // 判断vnode是element还是component
+      if (shapeFlag & ShapeFlags.ELEMENT) {
+        // 处理element（vnode.type = div）
+        processElement(vnode, container);
+      } else if (shapeFlag & ShapeFlags.STATEFUL_COMPONENT) {
+        // 处理组件
+        processComponent(vnode, container);
+      }
+  }
+}
+~~~
+
+而我们processFragment只需要将children渲染就可以了，调用mountChildren遍历children再patch
+
+~~~ts
+function processFragment(vnode: any, container: any) {
+  // 将所有children渲染出来
+  mountChildren(vnode, container);
+}
+~~~
+
+Fragment设置成为Symbol类型抽离出来
+
+~~~ts
+// vnode.ts
+export const Fragment = Symbol("Fragment");
+~~~
+
+<img src="C:\Users\MSK\AppData\Roaming\Typora\typora-user-images\image-20221208131705028.png" alt="image-20221208131705028" style="zoom:40%;" />
+
+至此，Fragment功能实现完毕。
+
+
+
+新需求：我们想要直接渲染文字节点，而不是将文字包裹在h函数中`h('div', {}, "你好")`，创建一个`createTextVNode("你好")`包裹文字。
+
+~~~ts
+  render() {
+    const app = h("div", {}, "App");
+    const foo = h(
+      Foo,
+      {},
+      {
+        header: ({ age }) =>
+          h("p", {}, ["header" + age, createTextVNode("你好")]),
+        footer: () => h("p", {}, "footer"),
+      }
+    );
+
+    return h("div", {}, [app, foo]);
+  },
+~~~
+
+
+
+同理，我们创建一个createTextVNode函数和一个Text Symbol类型。
+
+~~~ts
+// vnode.ts
+
+export const Text = Symbol("Text");
+
+export function createTextVNode(text: string) {
+  return createVNode(Text, {}, text)
+}
+~~~
+
+在render函数中，Text类型作为switch的一种case
+
+processText直接拿到vnode的children也就是文本，利用`document.createTextNode`原生方法创建文本节点。还要记得把当前文本节点给当前的vnode.el，之前这一步是在mountElement中实现的。
+
+~~~Ts
+// render.ts
+
+case Text:
+      processText(vnode, container);
+      break;
+
+function processText(vnode: any, container: any) {
+  const { children } = vnode;
+  const textNode = (vnode.el = document.createTextNode(children));
+  container.append(textNode);
+}
+~~~
+
+最后记得在runtime-core的入口文件导出`createTextVNode`
+
+这样打包时候，才会将他们导入到mini-vue.esm.js中去
+
+<img src="C:\Users\MSK\AppData\Roaming\Typora\typora-user-images\image-20221208135049895.png" alt="image-20221208135049895" style="zoom:40%;" />
+
+至此text类型节点实现完毕。
+
