@@ -1,5 +1,5 @@
 import { mutableHandlers, readonlyHandlers, shallowReadonlyHandlers } from "./baseHandlers";
-import { isObject } from "./shared";
+import { isObject } from "../shared";
 
 // 抽离is_reactive变量
 export const enum ReactiveFlags {

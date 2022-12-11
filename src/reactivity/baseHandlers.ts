@@ -1,6 +1,6 @@
 import { track, trigger } from "./effect";
 import { reactive, ReactiveFlags, readonly } from "./reactive";
-import { extend, isObject } from "./shared";
+import { extend, isObject } from "../shared";
 
 // 缓存get和set方法，只需要初始化时调用一次
 const get = createGetter();

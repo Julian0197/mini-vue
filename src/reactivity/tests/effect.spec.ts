@@ -39,12 +39,12 @@ describe("effect", () => {
     let run: any;
     const scheduler = jest.fn(() => {
       run = runner;
-    })
+    });
 
-    const obj = reactive({foo: 1})
+    const obj = reactive({ foo: 1 });
     const runner = effect(
       () => {
-        dummy = obj.foo
+        dummy = obj.foo;
       },
       { scheduler }
     );
@@ -56,40 +56,40 @@ describe("effect", () => {
     expect(dummy).toBe(1);
     // run函数执行effect函数的返回值
     run();
-    expect(dummy).toBe(2)
-  })
+    expect(dummy).toBe(2);
+  });
 
   it("stop", () => {
     let dummy;
-    const obj = reactive({prop: 1})
+    const obj = reactive({ prop: 1 });
     const runner = effect(() => {
-      dummy = obj.prop
+      dummy = obj.prop;
     });
     obj.prop = 2;
-    expect(dummy).toBe(2)
+    expect(dummy).toBe(2);
     stop(runner);
     // obj.prop = 3
     obj.prop++;
-    expect(dummy).toBe(2)
+    expect(dummy).toBe(2);
 
     // stoped effect should still be manually callable
-    runner()
-    expect(dummy).toBe(3)
-  })
+    runner();
+    expect(dummy).toBe(3);
+  });
 
   it("onStop", () => {
-    const obj = reactive({foo: 1})
-    const onStop = jest.fn()
+    const obj = reactive({ foo: 1 });
+    const onStop = jest.fn();
     let dummy;
     const runner = effect(
       () => {
-        dummy = obj.foo
+        dummy = obj.foo;
       },
       {
-        onStop
+        onStop,
       }
-    )
-    stop(runner)
-    expect(onStop).toBeCalledTimes(1)     
-  })
+    );
+    stop(runner);
+    expect(onStop).toBeCalledTimes(1);
+  });
 });

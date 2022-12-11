@@ -1,4 +1,4 @@
-import { shallowReadonly } from "../reactive";
+import { shallowReadonly } from "../reactivity/reactive";
 import { emit } from "./componentEmit";
 import { initProps } from "./componentProps";
 import { PublicInstanceProxyHandlers } from "./componentPublicInstance";
