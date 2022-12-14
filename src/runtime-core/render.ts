@@ -1,3 +1,4 @@
+import { effect } from "../reactivity";
 import { ShapeFlags } from "../shared/ShapeFlags";
 import { createComponentInstance, setupComponent } from "./component";
 import { createAppAPI } from "./createApp";
@@ -9,47 +10,66 @@ export function createRenderer(options) {
 
   function render(vnode, container) {
     // 调用patch方法（方便后续递归处理）
-    patch(vnode, container, null);
+    patch(null, vnode, container, null);
   }
 
-  function patch(vnode: any, container: any, parentComponent: any) {
-    const { type, shapeFlag } = vnode;
+  // n1 -> 旧的vnode
+  // n2 -> 新的vnode
+  function patch(n1: any, n2: any, container: any, parentComponent: any) {
+    const { type, shapeFlag } = n2;
 
     // Fragment => 只渲染 children
     switch (type) {
       case Fragment:
-        processFragment(vnode, container, parentComponent);
+        processFragment(n1, n2, container, parentComponent);
         break;
       case Text:
-        processText(vnode, container);
+        processText(n1, n2, container);
         break;
 
       default:
         // 判断vnode是element还是component
         if (shapeFlag & ShapeFlags.ELEMENT) {
           // 处理element（vnode.type = div）
-          processElement(vnode, container, parentComponent);
+          processElement(n1, n2, container, parentComponent);
         } else if (shapeFlag & ShapeFlags.STATEFUL_COMPONENT) {
           // 处理组件
-          processComponent(vnode, container, parentComponent);
+          processComponent(n1, n2, container, parentComponent);
         }
     }
   }
 
-  function processFragment(vnode: any, container: any, parentComponent: any) {
+  function processFragment(n1: any, n2: any, container: any, parentComponent: any) {
     // 将所有children渲染出来
-    mountChildren(vnode, container, parentComponent);
+    mountChildren(n2, container, parentComponent);
   }
 
-  function processText(vnode: any, container: any) {
-    const { children } = vnode;
-    const textNode = (vnode.el = document.createTextNode(children));
+  function processText(n1: any, n2: any, container: any) {
+    const { children } = n2;
+    const textNode = (n2.el = document.createTextNode(children));
     container.append(textNode);
   }
 
-  function processElement(vnode: any, container: any, parentComponent: any) {
-    mountElement(vnode, container, parentComponent);
+  function processElement(n1: any, n2: any, container: any, parentComponent: any) {
+    if (!n1) {
+      // init
+      mountElement(n2, container, parentComponent);
+    } else {
+      // update
+      patchElement(n1, n2, container);
+    }
   }
+
+  function patchElement(n1, n2, container) {
+    console.log("update");
+    
+    console.log("n1", n1);
+    console.log("n2", n2); 
+    
+    // props
+    // children
+  }
+
 
   function mountElement(vnode: any, container: any, parentComponent: any) {
     // 创建一个element,保存到vnode中
@@ -92,12 +112,12 @@ export function createRenderer(options) {
   function mountChildren(vnode: any, container: any, parentComponent: any) {
     // array里每一个都是虚拟节点
     vnode.children.forEach((v) => {
-      patch(v, container, parentComponent);
+      patch(null, v, container, parentComponent);
     });
   }
 
-  function processComponent(vnode: any, container: any, parentComponent: any) {
-    mountComponent(vnode, container, parentComponent);
+  function processComponent(n1: any, n2: any, container: any, parentComponent: any) {
+    mountComponent(n2, container, parentComponent);
   }
 
   function mountComponent(
@@ -114,19 +134,34 @@ export function createRenderer(options) {
   }
 
   function setupRenderEffect(instance: any, initialVnode: any, container: any) {
-    const { proxy } = instance;
+    // 依赖收集
+    effect(() => {
+      // 判断有没有完成初始化
+      if (!instance.isMounted) {
+        // init
+        const { proxy } = instance;
+        // 执行render函数
+        const subTree = (instance.subTree = instance.render.call(proxy));
+        // 由于执行render后返回依然是一个vnode对象，继续递归调用patch处理
+        patch(null, subTree, container, instance);
+        // patch对h函数返回的vnode进行处理（这里就是subTree）
+        // 在执行mountElement后，subTree.el已经赋好值了，这个时候再把值给vnode.el
+        initialVnode.el = subTree.el;
 
-    // 执行render函数
-    const subTree = instance.render.call(proxy);
-    // 由于执行render后返回依然是一个vnode对象，继续递归调用patch处理
-    patch(subTree, container, instance);
-    // patch对h函数返回的vnode进行处理（这里就是subTree）
-    // 在执行mountElement后，subTree.el已经赋好值了，这个时候再把值给vnode.el
-    initialVnode.el = subTree.el;
+        instance.isMounted = true;
+      } else {
+        // update
+        const { proxy } = instance;
+        const subTree = instance.render.call(proxy)
+        const prevSubTree = instance.subTree
+        instance.subTree = subTree;
+        patch(prevSubTree, subTree, container, instance)        
+      }
+    });
   }
 
   return {
     // 将render传递给createApi，createApi又包装了一层createApp，返回的是createApp函数
-    createApp: createAppAPI(render)
-  }
+    createApp: createAppAPI(render),
+  };
 }
