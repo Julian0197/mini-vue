@@ -339,7 +339,7 @@ function setupRenderEffect(instance: any, initialVnode: any, container: any) {
 
 由于我们真实DOM元素是通过`processElement`处理`element`时渲染得到的。
 
-所以 初始化的渲染 和 更新的渲染 逻辑是不一样的。
+所以 **初始化的渲染** 和 **更新的渲染** 逻辑是不一样的。
 
 如果没有传递`n1`，则说明是首次渲染，反之则是更新。
 
@@ -355,3 +355,185 @@ const processElement = function (n1, n2, container, parentComponent) { // 修改
 }
 ~~~
 
+在`patchElement`中打印一下更新时的`vnode`:
+
+```ts
+const patchElement = function(n1, n2, container) {
+  console.log(n1);
+  console.log(n2);
+}
+```
+
+
+
+点击`button`，触发依赖，实现更新，正确进入到`patchElement`中，打印新旧vnode，至此更新element流程搭建实现完毕。
+
+<img src="C:\Users\MSK\AppData\Roaming\Typora\typora-user-images\image-20221214211128369.png" alt="image-20221214211128369" style="zoom:33%;" />
+
+## 更新element的props
+
+<img src="C:\Users\MSK\AppData\Roaming\Typora\typora-user-images\image-20221214212559130.png" alt="image-20221214212559130" style="zoom:33%;" />
+
+更新`props`，有以下三种情况：
+
++ foo之前的值和现在的值不一样 => 修改
++ foo之前的值被赋值为`null || undefined` => 删除
++ bar这个属性本来有的，更新后删除了 => 删除
+
+实现以下案例：
+
+点击三个不同按钮，实现对`ref`类型响应式数据的修改和删除
+
+~~~js
+// App.js
+import { h, reactive, ref } from "../../lib/mini-vue.esm.js";
+
+export const App = {
+  setup() {
+    let props = ref({
+      foo: "foo",
+      bar: "bar",
+    });
+
+    const changeProps1 = () => {
+      props.value.foo = "new-foo";
+    };
+    const changeProps2 = () => {
+      props.value.foo = undefined;
+    };
+    const changeProps3 = () => {
+      props.value = {
+        foo: "foo",
+      }
+    };
+    return {
+      props,
+      changeProps1,
+      changeProps2,
+      changeProps3,
+    };
+  },
+  render() {
+    return h("div", { id: "root", ...this.props }, [
+      h("button", { onClick: this.changeProps1 }, "修改props中foo属性值"),
+      h("button", { onClick: this.changeProps2 }, "修改props中foo属性值变为undefined"),
+      h("button", { onClick: this.changeProps3 }, "删除props中的bar属性"),
+    ]);
+  },
+};
+~~~
+
+
+
+
+
+`props`是父组件传递给`children`的数据，在`mountElement`中第一次初始化时候要处理`props`，在`patchElement`中更新时也需要处理`props`。
+
+之前已经将将`patchProps`在`runtime-dom`中抽离出来，现在要对比`oldProps`和`newProps`重新渲染更新，因此需要三个参数：`el`当前处理的element，`oldProps`旧vnode的props和`newProps`新vnode的props。
+
+注意：新的vnode没有el属性，el属性是在初始化`mountElement`中挂载到`instance`上的
+
+~~~ts
+const EMPTY_OBJ = {}; 
+function patchElement(n1, n2, container) {
+    const oldProps = n1.props || EMPTY_OBJ;
+    const newProps = n2.props || EMPTY_OBJ;
+
+    // 旧vnode具有属性el，在mountElement中挂载，新vnode没有el
+    const el = (n2.el = n1.el);
+
+    patchProps(el, oldProps, newProps);
+    // children
+  }
+~~~
+
+
+
+详细解读一下`patchProps`:
+
++ 首先判断传入的新旧props是否一样，如果完全一样不需要更新props，直接结束
+  + 如果不一样，先遍历新props
+    + 看看有没有新增或修改的属性，有的话触发`el.setAttribute(key, nextVal)`
+    + 修改属性为`undefined || null`会触发`el.removeAttribute(key)`
+  + 如果旧的props不是空对象，再遍历旧的props，判断是否需有需要删除的元素
+    + `hostPatchProp(el, key, oldProps[key], null);`
+
+
+
+~~~ts
+function patchProps(el, oldProps, newProps) {
+    // 新旧完全一样，就不需要对比了
+    if (oldProps !== newProps) {
+      // 遍历新props，更新元素或者删除undefined
+      for (const key in newProps) {
+        const prevProp = oldProps[key];
+        const nextProp = newProps[key];
+
+        if (prevProp !== nextProp) {
+          // runtime-dom里面处理props的函数
+          hostPatchProp(el, key, prevProp, nextProp);
+        }
+      }
+
+      if (oldProps !== EMPTY_OBJ) {
+        // 遍历旧props，判断有没有需要删除的元素
+        for (const key in oldProps) {
+          if (!(key in newProps)) {
+            hostPatchProp(el, key, oldProps[key], null);
+          }
+        }
+      }
+    }
+  }
+~~~
+
+
+
+在`runtime-dom`中修改`patchProp`，也就是`render`中的`hostPatchProp`
+
++ 修改参数，需要新旧prop的value
++ 如果新value是undefined或null，直接删除当前DOM元素的key
++ 否则赋值当前value
+
+~~~ts
+function patchProp(el, key, prevVal, nextVal) {
+  // 确认规范 on + Event name，使用正则表达式
+  const isOn = (key: string) => /^on[A-Z]/.test(key);
+  if (isOn(key)) {
+    // 'onClick'第二位之后的是event name
+    const event = key.slice(2).toLowerCase();
+    el.addEventListener(event, nextVal);
+  } else {
+    // 删除元素
+    if (nextVal === undefined || nextVal === null) {
+      el.removeAttribute(key)
+    } else {
+      // 赋值元素
+      el.setAttribute(key, nextVal);
+    } 
+  }
+}
+~~~
+
+
+
+至此，更新element的props实现完毕。
+
+> 但是案例中的props如果用==reactive==包裹成为响应式对象
+>
+> 修改props会出现问题？？
+>
+> ~~~ts
+> let props = reactive({
+>       foo: "foo",
+>       bar: "bar",
+> }); 
+> 
+> const changeProps3 = () => {
+> 	props = {}
+> };
+> ~~~
+>
+> 
+
+<img src="C:\Users\MSK\AppData\Roaming\Typora\typora-user-images\image-20221216163757284.png" alt="image-20221216163757284" style="zoom:33%;" />

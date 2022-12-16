@@ -1,25 +1,33 @@
-import { h, ref } from "../../lib/mini-vue.esm.js";
+import { h, reactive, ref } from "../../lib/mini-vue.esm.js";
 
 export const App = {
-  name: "App",
-
   setup() {
-    const count = ref(0);
-    const onClick = () => {
-      count.value++;
-    };
+    let props = ref({
+      foo: "foo",
+      bar: "bar",
+    });
 
+    const changeProps1 = () => {
+      props.value.foo = "new-foo";
+    };
+    const changeProps2 = () => {
+      props.value.foo = undefined;
+    };
+    const changeProps3 = () => {
+      props.value = {}
+    };
     return {
-      count,
-      onClick,
+      props,
+      changeProps1,
+      changeProps2,
+      changeProps3,
     };
   },
-
   render() {
-    // this.count => count.value  
-    return h("div", { id: "root" }, [
-      h("div", {}, "count: " + this.count), // 依赖收集
-      h("button", { onClick: this.onClick }, "click"),
+    return h("div", { id: "root", ...this.props }, [
+      h("button", { onClick: this.changeProps1 }, "修改props中foo属性值"),
+      h("button", { onClick: this.changeProps2 }, "修改props中foo属性值变为undefined"),
+      h("button", { onClick: this.changeProps3 }, "删除props中的bar属性"),
     ]);
   },
 };
