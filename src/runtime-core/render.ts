@@ -10,6 +10,8 @@ export function createRenderer(options) {
     createElement: hostCreateElement,
     patchProp: hostPatchProp,
     insert: hostInsert,
+    remove: hostRemove,
+    setElementText: hostSetElementText,
   } = options;
 
   function render(vnode, container) {
@@ -50,7 +52,7 @@ export function createRenderer(options) {
     parentComponent: any
   ) {
     // 将所有children渲染出来
-    mountChildren(n2, container, parentComponent);
+    mountChildren(n2.children, container, parentComponent);
   }
 
   function processText(n1: any, n2: any, container: any) {
@@ -70,12 +72,12 @@ export function createRenderer(options) {
       mountElement(n2, container, parentComponent);
     } else {
       // update
-      patchElement(n1, n2, container);
+      patchElement(n1, n2, container, parentComponent);
     }
   }
 
   const EMPTY_OBJ = {};
-  function patchElement(n1, n2, container) {
+  function patchElement(n1, n2, container, parentComponent) {
     console.log("update");
 
     console.log("n1", n1);
@@ -87,8 +89,44 @@ export function createRenderer(options) {
     // 旧vnode具有属性el，在mountElement中挂载，新vnode没有el
     const el = (n2.el = n1.el);
 
+    patchChildren(n1, n2, el, parentComponent);
     patchProps(el, oldProps, newProps);
-    // children
+  }
+
+  function patchChildren(n1, n2, container, parentComponent) {
+    const prevShapeFlag = n1.shapeFlag;
+    const c1 = n1.children;
+    const { shapeFlag } = n2;
+    const c2 = n2.children;
+
+    // ToText
+    if (shapeFlag & ShapeFlags.TEXT_CHILDREN) {
+      // ArrayToText
+      if (prevShapeFlag & ShapeFlags.ARRAY_CHILDREN) {
+        // 清空老的 children（array）
+        unMountChildren(n1.children);
+      }
+      // TextToText
+      if (c1 !== c2) {
+        // 设置新children（text）
+        hostSetElementText(container, c2);
+      }
+    } else { 
+      // ToArray
+      if (prevShapeFlag & ShapeFlags.TEXT_CHILDREN) {
+        hostSetElementText(container, "")
+        mountChildren(c2, container, parentComponent)
+      }
+    }
+  }
+
+  function unMountChildren(children) {
+    // 每个children[i]都是h函数生成的vnode
+    for (let i = 0; i < children.length; i++) {
+      const el = children[i].el;
+      // remove
+      hostRemove(el);
+    }
   }
 
   function patchProps(el, oldProps, newProps) {
@@ -127,7 +165,7 @@ export function createRenderer(options) {
     if (shapeFlag & ShapeFlags.TEXT_CHILDREN) {
       el.textContent = children;
     } else if (shapeFlag & ShapeFlags.ARRAY_CHILDREN) {
-      mountChildren(vnode, el, parentComponent);
+      mountChildren(vnode.children, el, parentComponent);
     }
 
     // props
@@ -154,9 +192,9 @@ export function createRenderer(options) {
     hostInsert(el, container);
   }
 
-  function mountChildren(vnode: any, container: any, parentComponent: any) {
+  function mountChildren(children: any, container: any, parentComponent: any) {
     // array里每一个都是虚拟节点
-    vnode.children.forEach((v) => {
+    children.forEach((v) => {
       patch(null, v, container, parentComponent);
     });
   }

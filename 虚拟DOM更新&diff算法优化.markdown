@@ -537,3 +537,166 @@ function patchProp(el, key, prevVal, nextVal) {
 > 
 
 <img src="C:\Users\MSK\AppData\Roaming\Typora\typora-user-images\image-20221216163757284.png" alt="image-20221216163757284" style="zoom:33%;" />
+
+## 更新children
+
+在处理完`props`的更新后，继续处理`children`的更新。由于我们在生成`vnode`时，只支持**字符串和数组**的形式来创建子节点，字符串代表文本节点，数组代表子节点，所以在更新children存在以下4种情况：
+
++ String -> String
++ String -> Array
++ Array -> String
++ Array -> Array
+
+由于`Array -> Array`较为复杂，我们先来处理与文本节点相关的更新操作。
+
+
+
+实现以下案例：
+
+~~~js
+// App.js
+
+import { h, reactive, ref } from "../../lib/mini-vue.esm.js";
+import ArrayToText from "./ArrayToText.js";
+import TextToArray from "./TextToArray.js";
+import TextToText from "./TextToText.js";
+
+export const App = {
+  name: "App",
+  setup() {},
+  render() {
+    return h("div", {tId: 1}, [
+      h("p", {}, "主页"),
+      h(ArrayToText),
+      h(TextToText),
+      h(TextToArray),
+    ])
+  }
+};
+~~~
+这里以`TextToArray`为例，`TextToText`和`ArrayToText`中，将setup中的isChange挂载到windows，当改变isChange.value，会触发effect进行element的更新。
+~~~js
+import { ref, h } from "../../lib/mini-vue.esm.js";
+const prevChildren = "oldTextChildren"
+const nextChildren = [h("div", {}, "A"), h("div", {}, "B")];
+
+
+export default {
+  name: "TextToArray",
+  setup() {
+    const isChange = ref(false);
+    window.isChange = isChange;
+
+    return {
+      isChange
+    }
+  },
+  render() {
+    const self = this; 
+
+    return self.isChange === true
+      ? h("div", {}, nextChildren)
+      : h("div", {}, prevChildren)
+  }
+}
+~~~
+
+
+
+处理`children`更新的逻辑还是在`patchElement`函数中触发：
+
+~~~ts
+function patchElement(n1, n2, container, parentComponent) {
+	const oldProps = n1.props || EMPTY_OBJ
+    const newProps = n2.props || EMPTY_OBJ
+    const el = (n2.el = n1.el)
+    
+    // children update
+    patchChildren(n1, n2, el, parentComponent) // 新增
+    // props update
+    patchProps(el, oldProps, newProps)
+}
+~~~
+
+
+
+`patchChildren`实现所有关于`Text`类型的children节点时，逻辑如下：
+
++ 先获取旧节点孩子的类型，旧节点孩子，新节点孩子的类型，新节点
++ 如果新节点孩子类型是`Text`
+  + 如果旧节点孩子类型是`Array`，说明是`ArrayToText`
+    + 先清空Array中每一个元素，封装`unMountChildren`，传入参数是数组中每一个vnode，进行删除
+  + 如果新旧孩子不相同，无论是`TextToText`还是`ArrayToText`，都要设置新的Text
+    + 使用传入的`setElementText`给当前el设置text
++ 如果新节点孩子类型是`Array`
+  + 判断就节点孩子是不是`Text`，是Array的情况等后面再处理
+    + 如果是`Text`，要先将当前el的`textContent`置空：`hostSetElementText(container, "")`
+    + 再重新渲染Array中的vnode，`mountChildren(c2, container, parentComponent)`
+
+
+> 注意：这里为了统一`mountChildren`和`unMountChildren`，将第一个参数vnode都修改为当前vnode的children
+
+~~~ts
+function patchChildren(n1, n2, container, parentComponent) {
+    const prevShapeFlag = n1.shapeFlag;
+    const c1 = n1.children;
+    const { shapeFlag } = n2;
+    const c2 = n2.children;
+
+    // ToText
+    if (shapeFlag & ShapeFlags.TEXT_CHILDREN) {
+      // ArrayToText
+      if (prevShapeFlag & ShapeFlags.ARRAY_CHILDREN) {
+        // 清空老的 children（array）
+        unMountChildren(n1.children);
+      }
+      // TextToText
+      if (c1 !== c2) {
+        // 设置新children（text）
+        hostSetElementText(container, c2);
+      }
+    } else { 
+      // ToArray
+      if (prevShapeFlag & ShapeFlags.TEXT_CHILDREN) {
+        hostSetElementText(container, "")
+        mountChildren(c2, container, parentComponent)
+      }
+    }
+  }
+~~~
+删除当前container的children，遍历children（是一个数组）
+~~~ts
+  function unMountChildren(children) {
+    // 每个children[i]都是h函数生成的vnode
+    for (let i = 0; i < children.length; i++) {
+      const el = children[i].el;
+      // remove
+      hostRemove(el);
+    }
+  }
+~~~
+
+`hostRemove`封装在`runtime-dom`，找到当前被删除元素的parent，进行删除，都是原生DOM节点的API
+
+~~~ts
+function remove(child) {
+  // parentNode为DOM节点原生属性
+  // removeChild为DOM节点原生属性
+  const parent = child.parentNode;
+  if (parent) {
+    parent.removeChild(child);
+  }
+}
+~~~
+
+`hostSetElementText`封装在`runtime-dom`
+
+~~~ts
+function setElementText(el, text) {
+  el.textContent = text
+}
+~~~
+
+
+
+至此，更新children中和Text有关的element实现完毕。

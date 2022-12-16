@@ -14,11 +14,11 @@ function patchProp(el, key, prevVal, nextVal) {
   } else {
     // 删除元素
     if (nextVal === undefined || nextVal === null) {
-      el.removeAttribute(key)
+      el.removeAttribute(key);
     } else {
       // 赋值元素
       el.setAttribute(key, nextVal);
-    } 
+    }
   }
 }
 
@@ -26,10 +26,25 @@ function insert(el, parent) {
   parent.append(el);
 }
 
+function remove(child) {
+  // parentNode为DOM节点原生属性
+  // removeChild为DOM节点原生属性
+  const parent = child.parentNode;
+  if (parent) {
+    parent.removeChild(child);
+  }
+}
+
+function setElementText(el, text) {
+  el.textContent = text
+}
+
 const renderer: any = createRenderer({
   createElement,
   patchProp,
   insert,
+  remove,
+  setElementText,
 });
 
 export function createApp(...args) {
