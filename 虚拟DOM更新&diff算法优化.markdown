@@ -697,6 +697,52 @@ function setElementText(el, text) {
 }
 ~~~
 
-
-
 至此，更新children中和Text有关的element实现完毕。
+
+## 更新children —— 两端对比diff算法
+
+这一章慢慢处理`ArrrayToArray`情况，由于在`vnode`的更新操作时，节点的层级操作非常多，如果删除之前全部的节点重新渲染新节点，非常浪费性能。`diff`算法就是为了最小化的更新DOM。
+
+先实现**两端diff算法对比**的情况：
+
++ 增加
+
+  新旧vnode之间的差异，只存在于新vnode在后面增加了几个子节点，除此之外全部一致。分为从左侧增加，和从右侧增加。
+
+  <img src="C:\Users\MSK\AppData\Roaming\Typora\typora-user-images\image-20221216215139367.png" alt="image-20221216215139367" style="zoom:25%;" />
+
+  这种更新：难度在于如何寻找新增加的节点。使用循环遍历代价太大。需要依靠的是**双端指针**。
+
+  + i指向
+
++ 删除
+
+<img src="C:\Users\MSK\AppData\Roaming\Typora\typora-user-images\image-20221217221813467.png" alt="image-20221217221813467" style="zoom: 33%;" />
+
+
+
+<img src="C:\Users\MSK\AppData\Roaming\Typora\typora-user-images\image-20221217221838730.png" alt="image-20221217221838730" style="zoom: 33%;" />
+
+
+
+<img src="C:\Users\MSK\AppData\Roaming\Typora\typora-user-images\image-20221217221855058.png" alt="image-20221217221855058" style="zoom: 33%;" />
+
+
+
+<img src="C:\Users\MSK\AppData\Roaming\Typora\typora-user-images\image-20221217221919737.png" alt="image-20221217221919737" style="zoom: 33%;" />
+
+i=0 e1=-1 e2=1 
+
+
+
+<img src="C:\Users\MSK\AppData\Roaming\Typora\typora-user-images\image-20221217221947045.png" alt="image-20221217221947045" style="zoom: 33%;" />
+
+
+
+<img src="C:\Users\MSK\AppData\Roaming\Typora\typora-user-images\image-20221217222006844.png" alt="image-20221217222006844" style="zoom: 33%;" />
+
+i=0 e1=0 e2=-1
+
+
+
+<img src="C:\Users\MSK\AppData\Roaming\Typora\typora-user-images\image-20221217224234218.png" alt="image-20221217224234218" style="zoom:33%;" />

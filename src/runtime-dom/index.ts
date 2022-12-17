@@ -22,8 +22,10 @@ function patchProp(el, key, prevVal, nextVal) {
   }
 }
 
-function insert(el, parent) {
-  parent.append(el);
+function insert(child, parent, anchor) {
+  // parent.append(el);
+  // anchor为null，默认会添加到最后
+  parent.insertBefore(child, anchor || null)
 }
 
 function remove(child) {
