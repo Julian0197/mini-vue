@@ -703,46 +703,188 @@ function setElementText(el, text) {
 
 这一章慢慢处理`ArrrayToArray`情况，由于在`vnode`的更新操作时，节点的层级操作非常多，如果删除之前全部的节点重新渲染新节点，非常浪费性能。`diff`算法就是为了最小化的更新DOM。
 
-先实现**两端diff算法对比**的情况：
+先实现**两端diff算法对比**的情况，需要实现以下案例：
 
-+ 增加
++ 新旧children从左侧对比，在某个索引前元素相同，之后的元素不同
++ 新旧children从右侧对比，在某个索引后元素相同，之前的元素不同
++ 新children长度大于老children，需要创建新元素：
+  + 从左侧遍历，在某个索引前元素相同，这个索引后的元素都需要重新创建，添加到parent的尾部
+  + 从右侧遍历，在某个索引后元素相同，这个索引前的元素都需要重新创建，添加到parent的头部（其实是利用`insertBefore`添加到旧children索引最靠前的相同元素的前面）
++ 老children长度大于新children，需要删除元素：
+  + 从左侧遍历，某个索引前元素相同，这个索引后老children中的元素都需要删除
+  + 从右侧遍历，某个索引后元素相同，这个索引前老children中的元素都需要删除
++ 从左侧遍历有相同元素，从右侧遍历也有相同元素，中间元素不同
 
-  新旧vnode之间的差异，只存在于新vnode在后面增加了几个子节点，除此之外全部一致。分为从左侧增加，和从右侧增加。
 
-  <img src="C:\Users\MSK\AppData\Roaming\Typora\typora-user-images\image-20221216215139367.png" alt="image-20221216215139367" style="zoom:25%;" />
 
-  这种更新：难度在于如何寻找新增加的节点。使用循环遍历代价太大。需要依靠的是**双端指针**。
+实现案例的方式和上一节类似，通过改变window对象的`isChanged = true`，将`prevChild`改变为`nextChild`，实现自动更新渲染。
 
-  + i指向
+~~~js
+const App = {
+  setup() {
+    // 设置响应式数据
+    const isChange = reactive({
+      value: false
+    })
+    window.isChange = isChange;
 
-+ 删除
+    return {
+      isChange
+    }
+  },
+
+  render() {
+    let self = this
+		// 响应式数据改变时，更新children
+    return self.isChange.value === true ? 
+          h('div', {}, nextChild) :
+          h('div', {}, prevChild)
+  }
+}
+~~~
+
+上一节中实现和`text`类型相关的渲染更新时，在`patchChildren`中实现，最后一种情况就是`ArrayToArray`。单独封装`patchKeyedChildren`。
+
++ 我们需要三个指针，分别指向队头，和新旧children array的队尾
+
++ 封装`isSomeVNodeType`，用于判断两个vnode是否相同：判断属性`key`和`type`是否一致，`key`是我们在写案例时手动赋值在props属性中的，一致的话需要继续调用`patch`对`children`进行判断
+
++ **新增参数`parentAnchor`，用于标注新创建的元素在哪个元素之前。在`runtime-dom`中也需要修改`insert`，如果初试先传入null，这样会插入到当前parent的最后。（注意：需要变更所有与`hostInsert`相关API的参数，加入anchor参数）**
+
+  ~~~ts
+  function insert(child, parent, anchor) {
+    // parent.append(el);
+    // anchor为null，默认会添加到最后
+    parent.insertBefore(child, anchor || null)
+  }
+  ~~~
+
+~~~ts
+function patchKeyedChildren(
+    c1,
+    c2,
+    container,
+    parentComponent,
+    parentAnchor
+  ) {
+    const l2 = c2.length;
+    let i = 0; // 队头指针
+    // 队尾指针
+    let e1 = c1.length - 1;
+    let e2 = l2 - 1;
+
+    // 判断n1,n2是否一样
+    function isSomeVNodeType(n1, n2) {
+      // 基于 type 和 key判断是否一致
+      return n1.type === n2.type && n1.key === n2.key;
+    }
+}
+~~~
+
+### 左侧遍历
+
+while循环，从左向右移动头指针（头指针不超过两个children array的的长度），碰到相同的节点（type和key相同）继续调用patch对比他们的children。当前头结点指向的节点不同后，跳出循环，该头结点索引之后的节点需要处理，处理逻辑后续完成。
+
+~~~ts
+// 1.左侧
+while (i <= e1 && i <= e2) {
+  const n1 = c1[i];
+  const n2 = c2[i];
+  // 判断type和key是否一致
+  if (isSomeVNodeType(n1, n2)) {
+    // 调用patch递归对比（有可能内部children不一样）
+    patch(n1, n2, container, parentComponent, parentAnchor);
+  } else {
+    break;
+  }
+  i++;
+}
+~~~
+
+循环结束后，`i=2 e1=2 e2=3`
 
 <img src="C:\Users\MSK\AppData\Roaming\Typora\typora-user-images\image-20221217221813467.png" alt="image-20221217221813467" style="zoom: 33%;" />
 
+### 右侧遍历
 
+while循环，从右往左同时移动e1、e2指针，相同调用patch，不相同跳出循环，e1索引之前的节点需要删除，在头部添加e2索引之前的节点。
+
+~~~ts
+// 2.右侧
+while (i <= e1 && i <= e2) {
+  const n1 = c1[e1];
+  const n2 = c2[e2];
+  if (isSomeVNodeType(n1, n2)) {
+    patch(n1, n2, container, parentComponent, parentAnchor);
+  } else {
+    break;
+  }
+  e1--;
+  e2--;
+}
+~~~
+
+循环结束后，`i=0 e1=0 e2=1`
 
 <img src="C:\Users\MSK\AppData\Roaming\Typora\typora-user-images\image-20221217221838730.png" alt="image-20221217221838730" style="zoom: 33%;" />
 
+### 新的比老的长 - 创建
 
+~~~ts
+// 3.新的比老的多 创建
+if (i > e1) {
+  if (i <= e2) {
+    // debugger;
+    const nextPos = e2 + 1;
+    const anchor = nextPos < l2 ? c2[nextPos].el : null;
+    // 传入anchor，是为了在某个el前插入元素
+    // 在parent的最后插入元素直接传null，等同于append
+    while( i <= e2) {
+      patch(null, c2[i], container, parentComponent, anchor);
+      i++
+    }
+  }
+}
+~~~
 
-<img src="C:\Users\MSK\AppData\Roaming\Typora\typora-user-images\image-20221217221855058.png" alt="image-20221217221855058" style="zoom: 33%;" />
+#### 右侧一样 - 把新创建的添加到头部
 
-
+从右侧遍历，while循环结束后，`i=0 e1=-1 e2=0`。我们要在e2的位置添加新创建元素，所以将`anchor`设置为`c2[e2+1].el`，找到元素`a`，在a前面添加新元素c。**判断条件：e2+1<l2，如果e2+1>l2，说明在后面添加，将anchor设置为null。**
 
 <img src="C:\Users\MSK\AppData\Roaming\Typora\typora-user-images\image-20221217221919737.png" alt="image-20221217221919737" style="zoom: 33%;" />
 
-i=0 e1=-1 e2=1 
+#### 左侧一样 - 把新创建的添加到尾部
 
+先从左侧遍历，while循环结束后，`i=2 e1=1 e2=2`，这时候由于新的比老的多，`i>e1且i<e2`，需要在尾部添加新创建的元素，需要将`anchor`设置为`null`。**判断条件：e2+1>=l2**。
 
+<img src="C:\Users\MSK\AppData\Roaming\Typora\typora-user-images\image-20221218114345086.png" alt="image-20221218114345086" style="zoom:48%;" />
+
+### 老的比新的长 - 删除
+
+~~~ts
+else if (i > e2) {
+      // 4.老的比新的多
+      while(i <= e1) {
+        hostRemove(c1[i].el)
+        i++
+      }
+    } else {
+      // 乱序部分
+}
+~~~
+
+#### 左侧一样 - 把多余的从尾部删除
+
+从左向右遍历完后，`i=2 e1=2 e2=1`，将索引为`i~e1`vnode的el删除，`hostRemove(c1[i].el)`
 
 <img src="C:\Users\MSK\AppData\Roaming\Typora\typora-user-images\image-20221217221947045.png" alt="image-20221217221947045" style="zoom: 33%;" />
 
+#### 右侧一样 - 把多余的从头部删除
 
+从右往左完成遍历后，`i=0 e1=0 e2=-1`，将索引为`i~e1`vnode的el删除
 
 <img src="C:\Users\MSK\AppData\Roaming\Typora\typora-user-images\image-20221217222006844.png" alt="image-20221217222006844" style="zoom: 33%;" />
 
-i=0 e1=0 e2=-1
-
-
+### 中间对比 
 
 <img src="C:\Users\MSK\AppData\Roaming\Typora\typora-user-images\image-20221217224234218.png" alt="image-20221217224234218" style="zoom:33%;" />
