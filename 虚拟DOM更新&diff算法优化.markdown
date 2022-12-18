@@ -888,3 +888,133 @@ else if (i > e2) {
 ### 中间对比 
 
 <img src="C:\Users\MSK\AppData\Roaming\Typora\typora-user-images\image-20221217224234218.png" alt="image-20221217224234218" style="zoom:33%;" />
+
+## 更新children —— 中间对比（修改/删除）
+
+先实现中间对比中，修改存在的节点 和 删除多余的节点。
+
+下面案例中，中间部分：`c`是相同节点（但是props不同，需要patchProps），d在新的里面没有需要删除。
+
+~~~js
+// 5.对比中间的部分
+// 删除老的，在老的中存在，在新的中不存在
+// 5.1
+// a b (c d) f g
+// a b (e c) f g
+// d节点在新的中没有，需要删除
+// c节点的props发生变化
+ const prevChildren = [
+   h("p", { key: "A" }, "A"),
+   h("p", { key: "B" }, "B"),
+   h("p", { key: "C", id: "c-prev" }, "C"),
+   h("p", { key: "D" }, "D"),
+   h("p", { key: "F" }, "F"),
+   h("p", { key: "G" }, "G"),
+ ];
+
+ const nextChildren = [
+   h("p", { key: "A" }, "A"),
+   h("p", { key: "B" }, "B"),
+   h("p", { key: "E" }, "E"),
+   h("p", { key: "C", id: "c-next" }, "C"),
+   h("p", { key: "F" }, "F"),
+   h("p", { key: "G" }, "G"),
+ ];
+~~~
+
+实现思路：
+
++ `keyToNewIndexMap`建立c2中，中间不同元素的`key`和索引值的映射关系
++ 遍历c1 中间不同的元素，记录当前元素在c2中的索引`newIndex`
+  + 如果当前元素有`key`，在前面实现的`map`中寻找当前元素key在c2中的索引值
+  + 如果当前元素没有`key`，for循环遍历c2，使用`isSomeVNodeType`判断元素是否相同
++ 根据`newIndex`判断当前c1正在遍历的元素，需要深度patch还是删除。
+  + 如果`newIndex`不存在，说明旧的有，新的没有，直接删除`hostRemove(prevChild.el)`
+  + 如果`newIndex`存在，深度patch，`patch(prevChild.el, c2[newIndex].el, container, parenetComponent, null)`
+
+~~~ts
+else {
+    // 中间对比
+    let s1 = i;
+    let s2 = i;
+
+    const toBePatched = e2 - s2 + 1; // 新array children中需要被patch的个数
+    let patched = 0; // patch完一次，+1
+    // 建立新children array中，中间不同元素的key和索引值的映射关系
+    const keyToNewIndexMap = new Map();
+    for (let i = s2; i <= e2; i++) {
+      const nextChild = c2[i];
+      keyToNewIndexMap.set(nextChild.key, i)
+    }
+
+    for (let i = s1; i <= e1; i++) {
+      const prevChild = c1[i];
+      let newIndex;
+
+      if (patched >= toBePatched) {
+        hostRemove(prevChild.el);
+        continue;
+      }
+
+      // null || undefined
+      if (prevChild.key !== null) {
+        newIndex = keyToNewIndexMap.get(prevChild.key)
+      } else {
+        // 没有key只能循环遍历新children array查找有没有旧children array的元素
+        for (let j = s2; j <= e2; j++) {
+          if (isSomeVNodeType(prevChild, c2[j])) {
+            newIndex = j;
+            break;
+          }
+        }
+      }
+      // newIndex不存在，说明在新array children中没找到，需要删除
+      if (newIndex === undefined) {
+        hostRemove(prevChild.el)
+      } else {
+        // newIndex存在，继续patch深度对比修改（children）
+        patch(prevChild, c2[newIndex], container, parentComponent, null)
+        patched++
+      }
+    }
+  }
+~~~
+
+优化一下，当中间部分新的节点都被遍历过后，老的多出来的节点可以直接删除。
+
+~~~js
+// 中间部分老的比新的多
+// （优化5.1）当中间部分新的节点都被遍历过后，老的多出来的节点可以直接删除
+// a b (c e d) f g
+// a b (e c) f g
+const prevChildren = [
+  h("p", { key: "A" }, "A"),
+  h("p", { key: "B" }, "B"),
+  h("p", { key: "C", id: "c-prev" }, "C"),
+  h("p", { key: "E" }, "E"),
+  h("p", { key: "D" }, "D"),
+  h("p", { key: "F" }, "F"),
+  h("p", { key: "G" }, "G"),
+];
+
+const nextChildren = [
+  h("p", { key: "A" }, "A"),
+  h("p", { key: "B" }, "B"),
+  h("p", { key: "E" }, "E"),
+  h("p", { key: "C", id: "c-next" }, "C"),
+  h("p", { key: "F" }, "F"),
+  h("p", { key: "G" }, "G"),
+];
+~~~
+需要添加两个变量，`toBePatched`记录c2中间所有不同元素的个数，`patched`在c2中间元素被patch过后，+1自增。如果`patched === toBePatched`说明新children array中间不同元素都被patch过，那么如果c1中间不同元素还没遍历完，那么说明这些元素都是多余的了，可以直接删除，并进行下一个元素的删除操作。
+~~~ts
+const toBePatched = e2 - s2 + 1; // 新array children中需要被patch的个数
+let patched = 0; // patch完一次，+1
+
+// for循环遍历c1时，判断
+if (patched >= toBePatched) {
+  hostRemove(prevChild.el);
+  continue;
+}
+~~~
+

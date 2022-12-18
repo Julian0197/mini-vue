@@ -198,7 +198,49 @@ export function createRenderer(options) {
         i++
       }
     } else {
-      // 乱序部分
+      // 中间对比
+      let s1 = i;
+      let s2 = i;
+
+      const toBePatched = e2 - s2 + 1; // 新array children中需要被patch的个数
+      let patched = 0; // patch完一次，+1
+      // 建立新children array中，中间不同元素的key和索引值的映射关系
+      const keyToNewIndexMap = new Map();
+      for (let i = s2; i <= e2; i++) {
+        const nextChild = c2[i];
+        keyToNewIndexMap.set(nextChild.key, i)
+      }
+
+      for (let i = s1; i <= e1; i++) {
+        const prevChild = c1[i];
+        let newIndex;
+
+        if (patched >= toBePatched) {
+          hostRemove(prevChild.el);
+          continue;
+        }
+
+        // null || undefined
+        if (prevChild.key !== null) {
+          newIndex = keyToNewIndexMap.get(prevChild.key)
+        } else {
+          // 没有key只能循环遍历新children array查找有没有旧children array的元素
+          for (let j = s2; j <= e2; j++) {
+            if (isSomeVNodeType(prevChild, c2[j])) {
+              newIndex = j;
+              break;
+            }
+          }
+        }
+        // newIndex不存在，说明在新array children中没找到，需要删除
+        if (newIndex === undefined) {
+          hostRemove(prevChild.el)
+        } else {
+          // newIndex存在，继续patch深度对比修改（children）
+          patch(prevChild, c2[newIndex], container, parentComponent, null)
+          patched++
+        }
+      }
     }
   }
 
