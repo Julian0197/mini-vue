@@ -1018,3 +1018,269 @@ if (patched >= toBePatched) {
 }
 ~~~
 
+## 更新children —— 中间对比（增加/移动）
+
+上一节中，删除了c2中间不存在，但是c1中间存在的元素。但是对于c1c2中间都有的元素，不仅需要深度patch，还需要移动到合适的位置。
+
+实现以下综合案例：
+
+~~~js
+// a b (c d e z) f g
+// a b (d c y e) f g
+// c1和c2中 ce的顺序一致
+const prevChildren = [
+  h("p", { key: "A" }, "A"),
+  h("p", { key: "B" }, "B"),
+
+  h("p", { key: "C", id: "prev-id"}, "C"),
+  h("p", { key: "D" }, "D"),
+  h("p", { key: "E" }, "E"),
+  h("p", { key: "Z" }, "Z"),
+
+  h("p", { key: "F" }, "F"),
+  h("p", { key: "G" }, "G"),
+];
+const nextChildren = [
+  h("p", { key: "A" }, "A"),
+  h("p", { key: "B" }, "B"),
+
+  h("p", { key: "D" }, "D"),
+  h("p", { key: "C", id: "next-id"}, "C"),
+  h("p", { key: "Y" }, "Y"),
+  h("p", { key: "E" }, "E"),
+
+  h("p", { key: "F" }, "F"),
+  h("p", { key: "G" }, "G"),
+];
+~~~
+
+可以看到中间部分，需要删除旧元素`Z`，创建新元素`Y`，`C`和`E`的相对顺序不用改变，只需要改变`D`一个元素的顺序。
+
+<img src="C:\Users\MSK\AppData\Roaming\Typora\typora-user-images\image-20221227140956045.png" alt="image-20221227140956045" style="zoom:50%;" /> 
+
+
+
+**实现思路：**
+
++ 创建定长数组`newIndexToOldIndexMap`，长度为c2中间不同的元素个数。记录c1中元素在c2中的位置变化。初试值都是0,`0`表示该元素在c2有c1没有，需要重新patch创建。
+
+  + 比如`C D E Z`，遍历c1时候，`newIndexToOldIndexMap[newIndex - s2] = i + 1`，i为当前遍历元素在c1中的索引，newIndex为当前元素在c2中的索引，最后`C D E Z` => `D C Y E`，定长数组变为`[1+1 0+1 0 2+1]`(这边假设c的索引为0，前面没有元素)
+
++ 接下来使用`getSequence`，获取`newIndexToOldIndexMap`的最长递增子序列，`[2 1 0 3]` => `[1 3]`，最长递增子序列数组中记录的是不需要改变位置的元素索引。不在其中的元素，需要移动位置或者重新创建。
+
+  + 从后向前遍历，`for (let i = toBePatched - 1; i >= 0; i--)`，`anchor`就为nextIndex + 1的元素，不会出现插入异常
+
+  贪心算法+二分法，获取最长递增子序列，获得的数组中记录的是索引。
+
+  ~~~ts
+  function getSequence(arr) {
+    const p = arr.slice();
+    const result = [0];
+    let i, j, u, v, c;
+    const len = arr.length;
+    for (i = 0; i < len; i++) {
+      const arrI = arr[i];
+      if (arrI !== 0) {
+        j = result[result.length - 1];
+        if (arr[j] < arrI) {
+          p[i] = j;
+          result.push(i);
+          continue;
+        }
+        u = 0;
+        v = result.length - 1;
+        while (u < v) {
+          c = (u + v) >> 1;
+          if (arr[result[c]] < arrI) {
+            u = c + 1;
+          } else {
+            v = c;
+          }
+        }
+        if (arrI < arr[result[u]]) {
+          if (u > 0) {
+            p[i] = result[u - 1];
+          }
+          result[u] = i;
+        }
+      }
+    }
+    u = result.length;
+    v = result[u - 1];
+    while (u-- > 0) {
+      result[u] = v;
+      v = p[v];
+    }
+    return result;
+  }
+  ~~~
+
+  
+
++ 优化点：使用`moved`变量记录是否需要移动元素，如果不需要移动元素，则不需要调用`getSequence`。`newIndex`和`maxNewIndexSoFar`比较，如果`newIndex`始终更大，说明顺序没有改变，否则则需要移动元素。
+
+~~~ts
+function patchKeyedChildren(
+    c1,
+    c2,
+    container,
+    parentComponent,
+    parentAnchor
+  ) {
+    const l2 = c2.length;
+    let i = 0; // 队头指针
+    // 队尾指针
+    let e1 = c1.length - 1;
+    let e2 = l2 - 1;
+
+    // 判断n1,n2是否一样
+    function isSomeVNodeType(n1, n2) {
+      // 基于 type 和 key判断是否一致
+      return n1.type === n2.type && n1.key === n2.key;
+    }
+
+    // 1.左侧
+    while (i <= e1 && i <= e2) {
+      const n1 = c1[i];
+      const n2 = c2[i];
+      // 判断type和key是否一致
+      if (isSomeVNodeType(n1, n2)) {
+        // 调用patch递归对比（有可能内部children不一样）
+        patch(n1, n2, container, parentComponent, parentAnchor);
+      } else {
+        break;
+      }
+      i++;
+    }
+
+    // 2.右侧
+    while (i <= e1 && i <= e2) {
+      const n1 = c1[e1];
+      const n2 = c2[e2];
+      if (isSomeVNodeType(n1, n2)) {
+        patch(n1, n2, container, parentComponent, parentAnchor);
+      } else {
+        break;
+      }
+      e1--;
+      e2--;
+    }
+
+    // 3.新的比老的多 创建
+    if (i > e1) {
+      if (i <= e2) {
+        // debugger;
+        const nextPos = e2 + 1;
+        const anchor = nextPos < l2 ? c2[nextPos].el : null;
+        // 传入anchor，是为了在某个el前插入元素
+        // 在parent的最后插入元素直接传null，等同于append
+        while (i <= e2) {
+          patch(null, c2[i], container, parentComponent, anchor);
+          i++;
+        }
+      }
+    } else if (i > e2) {
+      // 4.老的比新的多
+      while (i <= e1) {
+        hostRemove(c1[i].el);
+        i++;
+      }
+    } else {
+      // 中间对比
+      // i是中间部分的起始索引
+      let s1 = i;
+      let s2 = i;
+
+      const toBePatched = e2 - s2 + 1; // 新array children中需要被patch的个数
+      let patched = 0; // patch完一次，+1
+
+      // 建立新children array中，中间不同元素的key和索引值的映射关系
+      const keyToNewIndexMap = new Map();
+
+      // 建立索引顺序映射
+      const newIndexToOldIndexMap = new Array(toBePatched);
+      let moved = false;
+      let maxNewIndexSoFar = 0;
+
+      for (let i = 0; i < toBePatched; i++) {
+        newIndexToOldIndexMap[i] = 0;
+      }
+
+      for (let i = s2; i <= e2; i++) {
+        const nextChild = c2[i];
+        keyToNewIndexMap.set(nextChild.key, i);
+      }
+
+      // 遍历c1中间部分
+      for (let i = s1; i <= e1; i++) {
+        const prevChild = c1[i];
+        let newIndex;
+
+        if (patched >= toBePatched) {
+          hostRemove(prevChild.el);
+          continue;
+        }
+
+        // null || undefined
+        if (prevChild.key !== null) {
+          newIndex = keyToNewIndexMap.get(prevChild.key);
+        } else {
+          // 没有key只能循环遍历新children array查找有没有旧children array的元素
+          for (let j = s2; j <= e2; j++) {
+            if (isSomeVNodeType(prevChild, c2[j])) {
+              newIndex = j;
+              break;
+            }
+          }
+        }
+        // newIndex不存在，说明在新array children中没找到，需要删除
+        if (newIndex === undefined) {
+          hostRemove(prevChild.el);
+        } else {
+          // 判断是否需要移动
+          if (newIndex >= maxNewIndexSoFar) {
+            maxNewIndexSoFar = newIndex;
+          } else {
+            moved = true;
+          }
+          // 在c2中找到了，和c1中想同key的元素
+          // newIndex是c1中的相同元素在c2中的索引，newIndex-s2将中间部分从0开始计数
+          // i + 1值为，在c1中的索引，由于初始值0代表没有的元素，要区分开
+          // 比如: c1中 c d e z，c2中 d c y e
+          // 【1+1 0+1 0 2+1】
+          newIndexToOldIndexMap[newIndex - s2] = i + 1;
+          // newIndex存在，继续patch深度对比修改（children）
+          patch(prevChild, c2[newIndex], container, parentComponent, null);
+          patched++;
+        }
+      }
+      // 【1+1 0+1 0 2+1】=> [1 3]这里1 3是最长递增子序列的索引
+      const increasingNewIndexSequence = moved ? getSequence(newIndexToOldIndexMap) : [];
+
+      // 从后向前遍历，插入时不会报错
+      let j = increasingNewIndexSequence.length - 1;
+      for (let i = toBePatched - 1; i >= 0; i--) {
+        const nextIndex = i + s2;
+        const nextChild = c2[nextIndex];
+        const anchor = nextIndex + 1 < l2 ? c2[nextIndex + 1].el : null;
+
+        // 老的不存在，新的存在，需要重新创建
+        if (newIndexToOldIndexMap[i] === 0) {
+          patch(null, nextChild, container, parentComponent, anchor)
+        }
+
+        if (moved) {
+          if (j < 0 || i !== increasingNewIndexSequence[j]) {
+            hostInsert(nextChild.el, container, anchor);
+          } else {
+            j--;
+          }
+        }
+      }
+    }
+  }
+~~~
+
+至此，更新children —— 中间对比（增加/移动）实现完毕。
+
+diff算法中`ArrayToArray`全部实现。

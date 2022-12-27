@@ -186,31 +186,44 @@ export function createRenderer(options) {
         const anchor = nextPos < l2 ? c2[nextPos].el : null;
         // 传入anchor，是为了在某个el前插入元素
         // 在parent的最后插入元素直接传null，等同于append
-        while( i <= e2) {
+        while (i <= e2) {
           patch(null, c2[i], container, parentComponent, anchor);
-          i++
+          i++;
         }
       }
     } else if (i > e2) {
       // 4.老的比新的多
-      while(i <= e1) {
-        hostRemove(c1[i].el)
-        i++
+      while (i <= e1) {
+        hostRemove(c1[i].el);
+        i++;
       }
     } else {
       // 中间对比
+      // i是中间部分的起始索引
       let s1 = i;
       let s2 = i;
 
       const toBePatched = e2 - s2 + 1; // 新array children中需要被patch的个数
       let patched = 0; // patch完一次，+1
+
       // 建立新children array中，中间不同元素的key和索引值的映射关系
       const keyToNewIndexMap = new Map();
-      for (let i = s2; i <= e2; i++) {
-        const nextChild = c2[i];
-        keyToNewIndexMap.set(nextChild.key, i)
+
+      // 建立索引顺序映射
+      const newIndexToOldIndexMap = new Array(toBePatched);
+      let moved = false;
+      let maxNewIndexSoFar = 0;
+
+      for (let i = 0; i < toBePatched; i++) {
+        newIndexToOldIndexMap[i] = 0;
       }
 
+      for (let i = s2; i <= e2; i++) {
+        const nextChild = c2[i];
+        keyToNewIndexMap.set(nextChild.key, i);
+      }
+
+      // 遍历c1中间部分
       for (let i = s1; i <= e1; i++) {
         const prevChild = c1[i];
         let newIndex;
@@ -222,7 +235,7 @@ export function createRenderer(options) {
 
         // null || undefined
         if (prevChild.key !== null) {
-          newIndex = keyToNewIndexMap.get(prevChild.key)
+          newIndex = keyToNewIndexMap.get(prevChild.key);
         } else {
           // 没有key只能循环遍历新children array查找有没有旧children array的元素
           for (let j = s2; j <= e2; j++) {
@@ -234,11 +247,46 @@ export function createRenderer(options) {
         }
         // newIndex不存在，说明在新array children中没找到，需要删除
         if (newIndex === undefined) {
-          hostRemove(prevChild.el)
+          hostRemove(prevChild.el);
         } else {
+          // 判断是否需要移动
+          if (newIndex >= maxNewIndexSoFar) {
+            maxNewIndexSoFar = newIndex;
+          } else {
+            moved = true;
+          }
+          // 在c2中找到了，和c1中想同key的元素
+          // newIndex是c1中的相同元素在c2中的索引，newIndex-s2将中间部分从0开始计数
+          // i + 1值为，在c1中的索引，由于初始值0代表没有的元素，要区分开
+          // 比如: c1中 c d e z，c2中 d c y e
+          // 【1+1 0+1 0 2+1】
+          newIndexToOldIndexMap[newIndex - s2] = i + 1;
           // newIndex存在，继续patch深度对比修改（children）
-          patch(prevChild, c2[newIndex], container, parentComponent, null)
-          patched++
+          patch(prevChild, c2[newIndex], container, parentComponent, null);
+          patched++;
+        }
+      }
+      // 【1+1 0+1 0 2+1】=> [1 3]这里1 3是最长递增子序列的索引
+      const increasingNewIndexSequence = moved ? getSequence(newIndexToOldIndexMap) : [];
+
+      // 从后向前遍历，插入时不会报错
+      let j = increasingNewIndexSequence.length - 1;
+      for (let i = toBePatched - 1; i >= 0; i--) {
+        const nextIndex = i + s2;
+        const nextChild = c2[nextIndex];
+        const anchor = nextIndex + 1 < l2 ? c2[nextIndex + 1].el : null;
+
+        // 老的不存在，新的存在，需要重新创建
+        if (newIndexToOldIndexMap[i] === 0) {
+          patch(null, nextChild, container, parentComponent, anchor)
+        }
+
+        if (moved) {
+          if (j < 0 || i !== increasingNewIndexSequence[j]) {
+            hostInsert(nextChild.el, container, anchor);
+          } else {
+            j--;
+          }
         }
       }
     }
@@ -393,4 +441,53 @@ export function createRenderer(options) {
     // 将render传递给createApi，createApi又包装了一层createApp，返回的是createApp函数
     createApp: createAppAPI(render),
   };
+}
+
+// 记录完下标后
+// newIndexToOldIndexMap = [4, 3, 0, 5]
+
+// 这也就对应了
+// [D, C, Y, E]
+// [4, 3, 0, 5]
+// Y为0，代表新增
+// 其他分别代表在旧的vnode中的下标位置
+function getSequence(arr) {
+  const p = arr.slice();
+  const result = [0];
+  let i, j, u, v, c;
+  const len = arr.length;
+  for (i = 0; i < len; i++) {
+    const arrI = arr[i];
+    if (arrI !== 0) {
+      j = result[result.length - 1];
+      if (arr[j] < arrI) {
+        p[i] = j;
+        result.push(i);
+        continue;
+      }
+      u = 0;
+      v = result.length - 1;
+      while (u < v) {
+        c = (u + v) >> 1;
+        if (arr[result[c]] < arrI) {
+          u = c + 1;
+        } else {
+          v = c;
+        }
+      }
+      if (arrI < arr[result[u]]) {
+        if (u > 0) {
+          p[i] = result[u - 1];
+        }
+        result[u] = i;
+      }
+    }
+  }
+  u = result.length;
+  v = result[u - 1];
+  while (u-- > 0) {
+    result[u] = v;
+    v = p[v];
+  }
+  return result;
 }
