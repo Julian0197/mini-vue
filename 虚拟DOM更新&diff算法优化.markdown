@@ -1517,3 +1517,173 @@ function updateComponentPreRender(instance, nextVNode) {
 
 至此组件更新实现完毕。
 
+## 实现nextTick功能
+
+下面案例中，点击update按钮触发onClick函数，onClick中循环增加count的值10次。实际更新DOM时，会执行更新逻辑10次。但其实我们只需要在for循环结束后，更新一次DOM。下面将实现该功能。
+
+~~~js
+// App.js
+
+export default {
+  name: "App",
+  setup() {
+    const count = ref(1);
+    function onClick() {
+      for (let i = 0; i < 10; i++) {
+        count.value = i;
+      }
+    }
+
+    return {
+      onClick,
+      count,
+    };
+  },
+  render() {
+    const button = h("button", { onClick: this.onClick }, "update");
+    const p = h("p", {}, "count: " + this.count);
+    return h("div", {}, [button, p]);
+  },
+};
+~~~
+
+
+
+**解决方法**
+
+将更新DOM操作注册到`微任务`中，所有同步任务完成后再执行微任务（更新视图），这样可以避免多次更新DOM的操作。
+
+在调用`effect`时候，在实现响应式原理时，实现过`scheduler`。当有scheduler配置时，触发依赖时不会调用`effect`，而是会执行`scheduler`中传入的fn。
+
+~~~ts
+ const setupRenderEffect = function (instance, vnode, container, anchor) {
+     instance.update = effect(() => { 
+      // 省略...
+   }, {
+     // 使用scheduler函数进行包裹
+     // 执行时会执行此函数
+     scheduler() {
+       queueJobs(instance.update);
+     }
+   })
+ }
+~~~
+
+
+
+单独封装`scheduler.ts`库
+
+`queueJobs`接受更新的函数（effect），将其存入队列`queue`中，最后再同步任务结束后，使用`Promise.resolve`一起执行更新操作。
+
+在案例中，App组件有三个`effect`函数，分别是App自己以及两个孩子，都会统一在同步任务结束后一起更新。
+
+> ES6 `Array.includes()`直接判断数组是否包含某个元素，返回true/false。
+
+~~~ts
+const queue: any[] = [];
+// 每次添加job，都要创建一次Promise.resolve
+// 现在设置一个状态isFlushPending，默认为false表示还没有创建过promise
+// 创建完Promise立刻将状态设置为true，期间queue中如果添加了其他job，都不会再创建Promise
+// 所有的job都将在一个Promise.resolve中执行
+// 当前Promise执行完后，再把状态重新设置为false
+let isFlushPending = false;
+
+export function queueJobs(job) {
+  // 添加任务，实际上是添加当前effect的fn，只需要添加一次
+  if (!queue.includes(job)) {
+    queue.push(job);
+  }
+  queueFlush();
+}
+
+function queueFlush() {
+  if (isFlushPending) return;
+  isFlushPending = true;
+
+  Promise.resolve().then(() => {
+    isFlushPending = false;
+    let job;
+    while ((job = queue.shift())) {
+      job && job();
+    }
+  });
+}
+~~~
+
+
+
+上面基本实现了延迟更新DOM的逻辑。
+
+在App的setup中，如果我们利用`getCurrentInstance`直接获取当前组件实例，不会得到更新后的结果，将获取实例的逻辑放到`nextTick`中，异步执行，能正确获取更新后的instance。
+
+~~~js
+// App.js
+
+ const App = {
+   setup() {
+     let count = reactive({
+       value: 0
+     })
+     
+     let changeCount = function() {
+       for(let i = 0; i < 10; i++) {
+         count.value = count.value + 1
+       }
+       // console.log(instance)
+       // 在nextTick函数中调用
+       nextTick(()=>{
+         const instance = getCurrentInstance()
+         console.log(instance)
+       })
+     }
+ 
+     return {
+       count,
+       changeCount
+     }
+   },
+   render() {
+     return h('div', {}, [
+       h('p', {}, `count： ${this.count.value}`),
+       h('button', { onClick: this.changeCount }, 'update')
+     ])
+   }
+ }
+~~~
+
+实现`nextTick`，以及重构一下queueFlush，用nextTick包裹。
+
+~~~ts
+// 定义一个状态为成功的promise状态
+const p = Promise.resolve();
+
+// nextTick就是用Promise包裹当前fn，异步执行fn
+export function nextTick(fn) {
+  return fn ? p.then(fn) : p;
+}
+
+export function queueJobs(job) {
+  // 添加任务，实际上是添加当前effect的fn，只需要添加一次
+  if (!queue.includes(job)) {
+    queue.push(job);
+  }
+  queueFlush();
+}
+
+function queueFlush() {
+  if (isFlushPending) return;
+  isFlushPending = true;
+  
+  nextTick(flushJobs);
+}
+
+function flushJobs() {
+  isFlushPending = false;
+  let job;
+  while ((job = queue.shift())) {
+    job && job();
+  }
+}
+~~~
+
+至此，nextTick功能实现完毕。

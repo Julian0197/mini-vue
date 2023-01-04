@@ -3,6 +3,7 @@ import { ShapeFlags } from "../shared/ShapeFlags";
 import { createComponentInstance, setupComponent } from "./component";
 import { shouldUpdateComponent } from "./componentUpdateUtils";
 import { createAppAPI } from "./createApp";
+import { queueJobs } from "./scheduler";
 import { Fragment, Text } from "./vnode";
 
 export function createRenderer(options) {
@@ -87,7 +88,7 @@ export function createRenderer(options) {
 
   const EMPTY_OBJ = {};
   function patchElement(n1, n2, container, parentComponent, anchor) {
-    // console.log("update");
+    console.log("update");
     // console.log("n1", n1);
     // console.log("n2", n2);
 
@@ -463,6 +464,11 @@ export function createRenderer(options) {
         const prevSubTree = instance.subTree;
         instance.subTree = subTree;
         patch(prevSubTree, subTree, container, instance, anchor);
+      }
+    }, {
+      scheduler() {
+        console.log("scheduler");
+        queueJobs(instance.update)
       }
     });
   }

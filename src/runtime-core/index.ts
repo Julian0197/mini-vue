@@ -4,6 +4,7 @@ export { createTextVNode } from "./vnode";
 export { getCurrentInstance } from "./component";
 export { provide, inject } from "./apiInject";
 export { createRenderer } from "./render";
+export { nextTick } from "./scheduler"
 
 // reactive 响应式
 export {
