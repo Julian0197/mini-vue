@@ -4,7 +4,8 @@ import { hasOwn } from "../shared";
 const publicPropertiesMap = {
   // 写成函数形式
   $el: (i) => i.vnode.el,
-  $slots: (i) => i.slots
+  $slots: (i) => i.slots,
+  $props: (i) => i.props,
 }
 
 

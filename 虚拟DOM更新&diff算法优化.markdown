@@ -1284,3 +1284,236 @@ function patchKeyedChildren(
 至此，更新children —— 中间对比（增加/移动）实现完毕。
 
 diff算法中`ArrayToArray`全部实现。
+
+## 实现组件更新
+
+上述diff算法都针对`element`类型进行更新，下面将实现`component`类型的更新。
+
+实现以下案例：
+
++ 在`App`组件中设置里响应式数据`msg`并将其作为`props`传入给子组件`Child`。
++ 点击按钮`change child props`，改变了msg的值，那么子组件`Child`也会发生更新
++ 单单点击按钮`change self count`，不会使得Child组件更新
+
+~~~js
+export const App = {
+  name: "App",
+  setup() {
+    const msg = ref("123");
+    const count = ref(1);
+
+    window.msg = msg;
+    const changeChildProps = () => {
+      msg.value = "456";
+    };
+
+    const changeCount = () => {
+      count.value++;
+    };
+
+    return {
+      msg,
+      count,
+      changeChildProps,
+      changeCount,
+    };
+  },
+  render() {
+    return h("div", {}, [
+      h(
+        "button",
+        {
+          onClick: this.changeChildProps,
+        },
+        "change child props"
+      ),
+      // 子组件，设置props
+      h(Child, {
+        msg: this.msg,
+      }),
+      h(
+        "button",
+        {
+          onClick: this.changeCount,
+        },
+        "change self count"
+      ),
+      h("p", {}, "count: " + this.count),
+    ]);
+  },
+};
+ 
+ const Child = {
+   setup() {},
+   render() {
+     // 使用this.$props使用props数据
+     return h("div", {}, [h("div", {}, "child-props-msg: " + this.$props.msg)])
+   }
+ }
+~~~
+
+
+
+可以看出更新`Child`组件，实际上要先更新组件的`props`属性。
+
+在获取数据时先增加`props`的拦截（代理对象proxy中）
+
+~~~ts
+ const publicPropertiesMap = {
+   $el: i => i.vnode.el,
+   $slots: i => i.slots,
+   // 增加$props拦截，通过$props来访问props数据
+   $props: i => i.props // 增加
+ }。
+~~~
+
+在`component`实例中增加`next`属性，用来保存`n2`（需要更新的vnode）
+
+~~~ts
+ const component = {
+   vnode,
+   type: vnode.type,
+   next: null, // 新增
+   props: {},
+   setupState: {},
+   provides: parent ? parent.provides : {},
+   parent: parent ? parent : {},
+   isMounted: false,
+   subTree: {},
+   slots: {},
+   emit: () => {}
+ }
+~~~
+
+在创建`vnode`时增加`component`保存当前组件实例（如果type是对象的话）
+
+~~~ts
+ const vnode = {
+   type,
+   props,
+   children,
+   component: null, // 增加
+   key: props && props.key,
+   shapeFlag: getShapeFlag(type),
+   el: null,
+ }
+~~~
+
+在处理组件`processCompnoent`函数中判断是否存在`n1`，如果不存在说明首次渲染，执行`mountComponent`，如果存在说明是更新操作，处理`updateComponent`更新逻辑。
+
+~~~ts
+  function processComponent(
+    n1: any,
+    n2: any,
+    container: any,
+    parentComponent: any,
+    anchor: any
+  ) {
+    if (!n1) {
+      mountComponent(n2, container, parentComponent, anchor);
+    } else {
+      updateComponent(n1, n2)
+    }
+  }
+~~~
+
+在首次渲染时，保存`component`属性到当前`vnode`中。
+
+~~~ts
+ const mountComponent = function (vnode, container, parentComponent, anchor) {
+   // 创建组件实例
+   const instance = (vnode.component = createComponentInstance(vnode, parentComponent)) // 修改
+ 
+   setupComponent(instance)
+   setupRenderEffect(instance, vnode, container, anchor)
+ }
+~~~
+
+`updateComponent`处理更新组件的逻辑。
+
++ 只要`App`组件中发生更新就会调用effect，会继续深度`patch`App的`children`。虽然children中部分内容可能没有变化，但只要碰到component类型的children，都会传入n1，会继续走`updateComponent`逻辑，造成性能损失。需要进一步判断。
++ vnode的`component`属性是在`mountComponent`第一次初始化时赋值的，当更新`App`组件中的内容时，patch子组件`Child`时，n2是新的vnode还没有`component`属性，所以在更新前要先获取`n1.component`
+
+~~~ts
+function updateComponent(n1, n2) {
+    // 获取component实例
+    const instance = (n2.component = n1.component)
+    // 判断是否需要更新
+    if (shouldUpdateComponent(n1, n2)) {
+        // 保存最新vnode
+        instance.next = n2
+        // 更新DOM
+        instance.update()
+    } else {
+        // 更新vnode
+        n2.el = n1.e;
+        instance.vnode = n2
+    }
+}
+~~~
+
+封装的`shouldUpdateComponent`将判断组件的`props`属性是否有发生改变，如果没有改变，不需要再执行effect。
+
+~~~ts
+export function shouldUpdateComponent(prevVNode, nextVNode) {
+  const { props: prevProps } = prevVNode;
+  const { props: nextProps } = nextVNode;
+
+  for (const key in nextProps) {
+    if (nextProps[key] !== prevProps[key]) {
+      return true;
+    }
+  }
+  return false;
+}
+~~~
+
+前面我们调用`instance.update()`实现更新，实际上是把之前`effect`中接受的fn挂载到组件实例`instance`中的`update`属性。之前初始化组件时`mountComponent`将组件实例`instance`挂载到vnode的`component`属性。遮样传入vnode，就可以执行更新操作。
+
++ 将effect的fn挂载到instance的update属性中。
+
++ patch前要修改当前组件实例的`vnode`、`props`、`next`，然后再patch subTree
+
+~~~ts
+function setupRenderEffect(instance, vnode, container, anchor) {
+     // 保存effect函数
+     instance.update = effect(() => { // 修改
+       if (!instance.isMounted) {
+         console.log("init");
+         const { proxy } = instance;
+         const subTree = (instance.subTree = instance.render.call(proxy));
+   
+         patch(null, subTree, container, instance, anchor);
+         vnode.el = subTree.el;
+         instance.isMounted = true;
+       } else {
+         console.log("update");
+   
+         const { next, vnode } = instance // 增加
+         if(next) { // 增加
+           next.el = vnode.el // 增加
+           // 在执行更新页面之前首先要先更新component实例中的各个属性
+           updateComponentPreRender(instance, next) // 增加
+         } // 增加
+   
+         const { proxy } = instance
+         const subTree = instance.render.call(proxy)
+         const prevSubTree = instance.subTree
+   
+         instance.subTree = subTree;
+         patch(prevSubTree, subTree, container, instance, anchor)
+   
+       }
+   })
+ }
+ 
+function updateComponentPreRender(instance, nextVNode) {
+   instance.vnode =  nextVNode
+   instance.next = null
+   // 这一步是在mountComponent中的setupComponent中的initProps实现的，而update操作需要单独更新props
+   instance.props = nextVNode.props
+ } 
+~~~
+
+至此组件更新实现完毕。
+

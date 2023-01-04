@@ -1,6 +1,7 @@
 import { effect } from "../reactivity";
 import { ShapeFlags } from "../shared/ShapeFlags";
 import { createComponentInstance, setupComponent } from "./component";
+import { shouldUpdateComponent } from "./componentUpdateUtils";
 import { createAppAPI } from "./createApp";
 import { Fragment, Text } from "./vnode";
 
@@ -86,10 +87,9 @@ export function createRenderer(options) {
 
   const EMPTY_OBJ = {};
   function patchElement(n1, n2, container, parentComponent, anchor) {
-    console.log("update");
-
-    console.log("n1", n1);
-    console.log("n2", n2);
+    // console.log("update");
+    // console.log("n1", n1);
+    // console.log("n2", n2);
 
     const oldProps = n1.props || EMPTY_OBJ;
     const newProps = n2.props || EMPTY_OBJ;
@@ -388,7 +388,25 @@ export function createRenderer(options) {
     parentComponent: any,
     anchor: any
   ) {
-    mountComponent(n2, container, parentComponent, anchor);
+    if (!n1) {
+      mountComponent(n2, container, parentComponent, anchor);
+    } else {
+      updateComponent(n1, n2)
+    }
+  }
+
+  function updateComponent(n1, n2) {
+    // 获取component实例
+    const instance = (n2.component = n1.component)
+    // 判断是否需要更新组件
+    if (shouldUpdateComponent(n1, n2)) {
+      instance.next = n2 // 下次要更新的vnode
+      instance.update(); // 继续调用effect的fn,更新DOM
+    } else {
+      // 不需要更新则复用el
+      n2.el = n1.el
+      instance.vnode = n2
+    }
   }
 
   function mountComponent(
@@ -398,7 +416,8 @@ export function createRenderer(options) {
     anchor: any
   ) {
     // 创建组件实例
-    const instance = createComponentInstance(initialVnode, parentComponent);
+    // 将组件实例挂载到initialVnode中的component属性中
+    const instance = (initialVnode.component = createComponentInstance(initialVnode, parentComponent));
     // 处理setup
     setupComponent(instance);
     // 处理render
@@ -412,7 +431,9 @@ export function createRenderer(options) {
     anchor: any
   ) {
     // 依赖收集
-    effect(() => {
+    // 将effect函数返回得到的runnner函数赋值给当前实例的update变量
+    // 返回的runner就是执行传入的箭头函数
+    instance.update = effect(() => {
       // 判断有没有完成初始化
       if (!instance.isMounted) {
         // init
@@ -428,7 +449,16 @@ export function createRenderer(options) {
         instance.isMounted = true;
       } else {
         // update
+
+        // 还要更新组件的props
+        const { next, vnode } = instance;
+        if (next) {
+          next.el = vnode.el
+          updateComponentPreRender(instance, next)
+        }
+
         const { proxy } = instance;
+        // 重新调render函数，返回新的vnode
         const subTree = instance.render.call(proxy);
         const prevSubTree = instance.subTree;
         instance.subTree = subTree;
@@ -442,6 +472,14 @@ export function createRenderer(options) {
     createApp: createAppAPI(render),
   };
 }
+
+function updateComponentPreRender(instance, nextVNode) {
+  instance.vnode = nextVNode;
+  instance.next = null;
+  // 这一步是在mountComponent中的setupComponent中的initProps实现的，而update操作需要单独更新props
+  instance.props = nextVNode.props;
+}
+
 
 // 记录完下标后
 // newIndexToOldIndexMap = [4, 3, 0, 5]
