@@ -31,9 +31,29 @@ function parseChildren(context: any) {
     }
   }
 
+  if (!node) {
+    node = parseText(context);
+  }
+
   // 收集
   nodes.push(node);
   return nodes;
+}
+
+function parseText(context: any) {
+  const content = parseTextData(context, context.source.length);
+  return {
+    type: NodeTypes.TEXT,
+    content,
+  };
+}
+
+function parseTextData(context: any, length) {
+  // 1.获取content
+  const content = context.source.slice(0, length);
+  // 2.推进
+  advanceBy(context, length);
+  return content;
 }
 
 function parseInterpolation(context: any) {
@@ -53,11 +73,15 @@ function parseInterpolation(context: any) {
   // 获取除{{和}}外的总长度
   // rawContentLength = 9
   const rawContentLength = closeIndex - openDelimiter.length;
+
   // rawContent = 空格message空格
-  const rawContent = context.source.slice(0, rawContentLength);
+  // const rawContent = context.source.slice(0, rawContentLength);
+  const rawContent = parseTextData(context, rawContentLength)
+
   // content = message
   // 清除空格
   const content = rawContent.trim();
+
   // 截取（也可以理解为删除，删除已经处理过的字符串）
   advanceBy(context, rawContentLength + closeDelimiter.length);
 
@@ -72,15 +96,15 @@ function parseInterpolation(context: any) {
 
 const enum TagType {
   START,
-  END
+  END,
 }
 
 function parseElement(context: any) {
   // 处理开始标签<div>
   const element = parseTag(context, TagType.START);
   // 处理结束标签</div>
-  parseTag(context, TagType.END)
-  return element
+  parseTag(context, TagType.END);
+  return element;
 }
 
 function parseTag(context: any, type: TagType) {
@@ -92,9 +116,9 @@ function parseTag(context: any, type: TagType) {
   advanceBy(context, match[0].length);
   advanceBy(context, 1);
   // console.log(context.source);
-  
-  if (type === TagType.END) return
-  
+
+  if (type === TagType.END) return;
+
   return {
     type: NodeTypes.ELEMENT,
     tag: tag,
