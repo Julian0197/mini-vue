@@ -2,7 +2,7 @@ import { NodeTypes } from "./ast";
 
 export function baseParse(content: string) {
   const context = createParserContext(content);
-  return createRoot(parseChildren(context));
+  return createRoot(parseChildren(context, []));
 }
 
 function createParserContext(content: string): any {
@@ -17,31 +17,63 @@ function createRoot(children: any) {
   };
 }
 
-function parseChildren(context: any) {
+function parseChildren(context: any, ancestors) {
   // 收集到nodes中
   const nodes: any = [];
 
-  let node: any;
-  // 判断是否为{{开头的字符串，是的话说明是插值类型
-  if (context.source.startsWith("{{")) {
-    node = parseInterpolation(context);
-  } else if (context.source[0] === "<") {
-    if (/[a-z]/i.test(context.source[1])) {
-      node = parseElement(context);
+  while (!isEnd(context, ancestors)) {
+    let node: any;
+    const s = context.source
+    // 判断是否为{{开头的字符串，是的话说明是插值类型
+    if (s.startsWith("{{")) {
+      node = parseInterpolation(context);
+    } else if (s[0] === "<") {
+      if (/[a-z]/i.test(s[1])) {
+        node = parseElement(context, ancestors);
+      }
     }
-  }
 
-  if (!node) {
-    node = parseText(context);
-  }
+    if (!node) {
+      node = parseText(context);
+    }
 
-  // 收集
-  nodes.push(node);
+    // 收集
+    nodes.push(node);
+  }
   return nodes;
 }
 
+function isEnd(context: any, ancestors) {
+  const s = context.source;
+  // 2.遇到结束标签
+  if (s.startsWith("</")) {
+    for (let i = 0; i < ancestors.length; i++) {
+      const tag = ancestors[i].tag
+      if (startsWithEndTagOpen(s, tag)) {
+        return true
+      }
+    }
+  }
+  // // 2.遇到结束标签
+  // if (parentTag && s.startsWith(`</${parentTag}>`)) {
+  //   return true;
+  // }
+  // 1.source有值
+  return !s;
+}
+
 function parseText(context: any) {
-  const content = parseTextData(context, context.source.length);
+  let endIndex = context.source.length;
+  let endToken = ["<", "{{"];
+  for (let i = 0; i < endToken.length; i++) {
+    const index = context.source.indexOf(endToken[i]);
+    if (index !== -1 && endIndex > index) {
+      endIndex = index;
+    }
+  }
+
+  const content = parseTextData(context, endIndex);
+
   return {
     type: NodeTypes.TEXT,
     content,
@@ -76,20 +108,21 @@ function parseInterpolation(context: any) {
 
   // rawContent = 空格message空格
   // const rawContent = context.source.slice(0, rawContentLength);
-  const rawContent = parseTextData(context, rawContentLength)
+  const rawContent = parseTextData(context, rawContentLength);
 
   // content = message
   // 清除空格
   const content = rawContent.trim();
 
   // 截取（也可以理解为删除，删除已经处理过的字符串）
-  advanceBy(context, rawContentLength + closeDelimiter.length);
+  // 只需要删除闭合标签的长度
+  advanceBy(context, closeDelimiter.length);
 
   return {
     type: NodeTypes.INTERPOLATION,
     content: {
       type: NodeTypes.SIMPLE_EXPRESSION,
-      content: content,
+      content,
     },
   };
 }
@@ -99,19 +132,35 @@ const enum TagType {
   END,
 }
 
-function parseElement(context: any) {
+function parseElement(context: any, ancestors) {
   // 处理开始标签<div>
-  const element = parseTag(context, TagType.START);
+  const element: any = parseTag(context, TagType.START);
+  ancestors.push(element)
+  // 处理children
+  element.children = parseChildren(context, ancestors);
+  ancestors.pop()
   // 处理结束标签</div>
-  parseTag(context, TagType.END);
+  // 判断当前elment的结束标签是否和context.source中的能对应上
+  if (startsWithEndTagOpen(context.source, element.tag)) {
+    parseTag(context, TagType.END);
+  } else {
+    throw new Error(`缺少结束标签: ${element.tag}`)
+  }
+  
   return element;
+}
+
+function startsWithEndTagOpen(source, tag) {
+  return source.slice(2, 2 + tag.length).toLowerCase() === tag.toLowerCase()
 }
 
 function parseTag(context: any, type: TagType) {
   // 1.解析tag
   // <div
-  const match: any = /^<\/?([a-z]*)/i.exec(context.source); // ["<div", "div", ...]
-  const tag = match[1];
+  // match:  ["<div", "div", ...]
+  const match: any = /^<\/?([a-z]*)/i.exec(context.source); 
+  const tag: any = match[1];
+  
   // 2.删除处理后的element
   advanceBy(context, match[0].length);
   advanceBy(context, 1);
@@ -121,7 +170,7 @@ function parseTag(context: any, type: TagType) {
 
   return {
     type: NodeTypes.ELEMENT,
-    tag: tag,
+    tag,
   };
 }
 
