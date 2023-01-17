@@ -1,6 +1,7 @@
 import { generate } from "../src/codegen";
 import { baseParse } from "../src/parse";
 import { transformExpression } from "../src/transforms/transformExpression";
+import { transformElement } from "../src/transforms/transfromElement";
 import { transform } from "../src/transfrom";
 
 describe("codegen", () => {
@@ -25,4 +26,22 @@ describe("codegen", () => {
     const { code } = generate(ast);
     expect(code).toMatchSnapshot();
   });
+
+  it("element", () => {
+    const ast = baseParse("<div></div>");
+    transform(ast, {
+      nodeTransforms: [transformElement]
+    });
+    const { code } = generate(ast);
+    expect(code).toMatchSnapshot();
+  });
+
+  it("multi", () => {
+    const ast = baseParse("<div>hi, {{ message }}</div>")
+    transform(ast, {
+      nodeTransforms: [transformExpression, transformElement]
+    });
+    const { code } = generate(ast);
+    expect(code).toMatchSnapshot();
+  })
 });
