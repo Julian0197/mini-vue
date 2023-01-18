@@ -1,3 +1,4 @@
+import { isString } from "../../shared";
 import { NodeTypes } from "./ast";
 import {
   CREATE_ELEMENT_VNODE,
@@ -19,7 +20,7 @@ export function generate(ast) {
 
   // 这一步逻辑封装在transform中的createRootCodegen
   // const node = ast.children[0]
-  getNode(ast.codegenNode, context);
+  genNode(ast.codegenNode, context);
 
   push("}");
   // return {
@@ -50,7 +51,7 @@ function getFunctionPreamble(ast: any, context: any) {
   push("return ");
 }
 
-function getNode(node, context) {
+function genNode(node, context) {
   switch (node.type) {
     case NodeTypes.TEXT:
       genText(node, context);
@@ -64,6 +65,9 @@ function getNode(node, context) {
     case NodeTypes.ELEMENT:
       genElement(node, context);
       break;
+    case NodeTypes.COMPOUND_EXPRESSION:
+      genCompoundExpression(node, context);
+      break;
     default:
       break;
   }
@@ -71,14 +75,14 @@ function getNode(node, context) {
 
 function genText(node: any, context: any) {
   const { push } = context;
-  push(`${node.content}`);
+  push(`"${node.content}"`);
 }
 
 function genInterpolation(node: any, context: any) {
   const { push, helper } = context;
 
   push(`${helper(TO_DISPLAY_STRING)}(`);
-  getNode(node.content, context);
+  genNode(node.content, context);
   push(")");
 }
 
@@ -89,11 +93,52 @@ function genExpression(node: any, context: any) {
 
 function genElement(node: any, context: any) {
   const { push, helper } = context;
-  const { tag } = node;
-  console.log(`("${tag}")`);
+  const { tag, children, props } = node;
   
-  push(`${helper(CREATE_ELEMENT_VNODE)}`);
-  push(`("${tag}")`)
+  push(`${helper(CREATE_ELEMENT_VNODE)}(`);
+  
+
+  // 循环处理children（hi, 和 {{message}}）
+  // for (let i = 0; i < children.length; i++) {
+  //   const child = children[i];
+  //   genNode(child, context);
+  // }
+  // transformText后，目前children只有一个元素
+  genNodeList(genNullable([tag, props, children]), context)
+  
+  push(")");
+}
+
+function genNullable(args: any) {
+  return args.map((arg) => arg || "null")
+}
+
+function genNodeList(nodes: any, context: any) {
+  const {push} = context
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i]
+    if (isString(node)) {
+      push(node)
+    } else {
+      genNode(node, context)
+    }
+    if (i < nodes.length - 1) {
+      push(", ")
+    }
+  }
+}
+
+function genCompoundExpression(node: any, context: any) {
+  const { push } = context;
+  const children = node.children;
+  for (let i = 0; i < children.length; i++) {
+    const child = children[i];
+    if (isString(child)) { // +
+      push(child);
+    } else {
+      genNode(child, context)
+    }
+  }
 }
 
 function createCodegenContext(): any {
