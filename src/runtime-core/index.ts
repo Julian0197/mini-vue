@@ -1,10 +1,11 @@
 export { h } from "./h";
 export { renderSlots } from "./helpers/renderSlots";
-export { createTextVNode } from "./vnode";
-export { getCurrentInstance } from "./component";
+export { createTextVNode, createElementVNode } from "./vnode";
+export { getCurrentInstance, registerRuntimeCompiler } from "./component";
 export { provide, inject } from "./apiInject";
 export { createRenderer } from "./render";
-export { nextTick } from "./scheduler"
+export { nextTick } from "./scheduler";
+export { toDisplayString } from "../shared";
 
 // reactive 响应式
 export {
@@ -25,4 +26,4 @@ export {
   effect,
   stop,
   computed,
-} from "../reactivity"
+} from "../reactivity";

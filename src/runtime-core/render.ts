@@ -440,7 +440,7 @@ export function createRenderer(options) {
         // init
         const { proxy } = instance;
         // 执行render函数
-        const subTree = (instance.subTree = instance.render.call(proxy));
+        const subTree = (instance.subTree = instance.render.call(proxy, proxy));
         // 由于执行render后返回依然是一个vnode对象，继续递归调用patch处理
         patch(null, subTree, container, instance, anchor);
         // patch对h函数返回的vnode进行处理（这里就是subTree）
@@ -460,7 +460,7 @@ export function createRenderer(options) {
 
         const { proxy } = instance;
         // 重新调render函数，返回新的vnode
-        const subTree = instance.render.call(proxy);
+        const subTree = instance.render.call(proxy, proxy);
         const prevSubTree = instance.subTree;
         instance.subTree = subTree;
         patch(prevSubTree, subTree, container, instance, anchor);
