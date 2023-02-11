@@ -82,7 +82,7 @@ export function createApp(rootComponent) {
       // 先把所有东西转化为虚拟节点vnode
       // 后续所有逻辑操作基于 vnode 处理
 
-      const vnode = createVNode(rootComponent)
+      const vnode = createVNode(rootComponent);
 
       render(vnode, rootContainer);
     }
@@ -507,7 +507,7 @@ export const App = {
 
 接下来要在render函数中**通过this访问setup中的msg**：在执行render函数时，将this绑定到setup函数返回的对象上(`setupState`)。
 
-除此之外，我们没有再setup()中定义`$el`，但是vue3提供了`this.$el`用于访问组件实例管理的DOM根节点。
+除此之外，我们没有在setup()中定义`$el`，但是vue3提供了`this.$el`用于访问组件实例管理的DOM根节点。
 
 `$el`：直到组件挂载完成之前都是`undefined`
 
@@ -547,6 +547,19 @@ function setupStatefulComponent(instance: any) {
     const setupResult = setup();
     handleSetupResult(instance, setupResult);
   }
+}
+
+function handleSetupResult(instance, setupResult: any) {
+  // 基于function 或 object
+  // TODO function
+  if (typeof setupResult === "object") {
+    instance.setupState = setupResult;
+  }
+  finishComponentSetup(instance);
+}
+function finishComponentSetup(instance: any) {
+  const Component = instance.type; 
+  instance.render = Component.render;
 }
 ~~~
 
@@ -757,6 +770,7 @@ function patch(vnode, container) {
       onMousedown() {
         console.log("mousedown")
       }
+    }
 ~~~
 
 
@@ -803,7 +817,6 @@ function patch(vnode, container) {
 + 将父组建传递的props对象设置为`shallowReadonly`（浅只读），修改第一层会报错
 
 ~~~ts
-
 export const App = {
   render() {
     window.self = this
@@ -997,7 +1010,7 @@ export const Foo = {
 };
 ~~~
 
-我们在setup中结构emit：`setup(props, { emit })`，因此在setupComponent中调用setup时要传入`emit`。
+我们在setup中解构emit：`setup(props, { emit })`，因此在setupComponent中调用setup时要传入`emit`。
 
 给组件实例初始化emit值，再调用setup函数时，传入emit属性
 
@@ -1014,7 +1027,7 @@ export function createComponentInstance(vnode) {
     emit: () => {},
   };
 
-  // 使用bind预先传入insance，emit函数只需要传入对应事件
+  // 使用bind预先传入instance，emit函数只需要传入对应事件
   component.emit = emit.bind(null, component) as any;
   return component;
 }
@@ -1576,7 +1589,7 @@ export default {
      type: vnode.type,
      props: {},
      setupState: {},
-     // 添加provides
+     // 添加provides，初始化为parent的provides
      provides: parent ? parent.provides : {}, // 修改
      // 添加parent，用于保存父级component实例
      parent: parent ? parent : {}, // 修改
@@ -1594,7 +1607,7 @@ export default {
 
 通过`getCurrentInstance`获取当前`instance`，注意instance只能在`setup`中获取。
 
-在provide函数中，拿到当前instance的provides和parent的provides，如果两者相同，说明在该组件中还没有provide新的值，初始化`currentInstance.provides`为空对象，并将它的原型对象指向`parent.provides`：利用`provides = currentInstance.provides = Object.create(parentProvides);`
+在provide函数中，拿到当前instance的provides和parent的provides，如果两者相同，说明是第一次provide，初始化`currentInstance.provides`为空对象，并将它的原型对象指向`parent.provides`：利用`provides = currentInstance.provides = Object.create(parentProvides);`
 
 **注意：**`provides = currentInstance.provides`，由于provides是ES6解构出来的，他是一个新的变量对解构对象有一层浅拷贝，所以当我们修改了对象的数据，provides的值也需要再重新引用。
 

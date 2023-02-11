@@ -407,7 +407,7 @@ let activeEffect
 
 function effect(fn) {
   // 将操作包装为一个函数
-  const effectFn = ()=> {
+  const effectFn = () => {
     activeEffect = effectFn
     fn()
   }
@@ -756,7 +756,7 @@ class ReactiveEffect {
 
 ### jest中的Mock函数
 
-创建Mock函数帮助我们测试项目中一些逻辑复杂的代码，例如：函数的嵌套调用等。在单元测试中，我们有时函数调用的结果和执行过程，只想知道它是否被正确调用。
+创建Mock函数帮助我们测试项目中一些逻辑复杂的代码，例如：函数的嵌套调用等。在单元测试中，我们有时不管函数调用的结果和执行过程，只想知道它是否被正确调用。
 
 Mock函数提供以下三种特性：
 
